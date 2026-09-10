@@ -24,3 +24,9 @@ data/pairs.json
 
 # 飞书CLI自动安装的第三方技能（非项目本体）
 .agents/skills/lark-*/
+
+# IDE/杂项
+.idea/
+.claude/
+.zcode/
+lark-auth-qrcode.png
