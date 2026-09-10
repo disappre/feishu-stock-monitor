@@ -59,7 +59,10 @@ class ChanThirdPointRule:
         if cs is None:
             return []
         analyze, detect_3rd = _load_chan()
-        pts = detect_3rd(cs.c.zs_list, cs.c.bi_list)
+        last_px = float(kline["close"].iloc[-1])
+        # 失效校验+有效期：现价回中枢区间=信号失效；信号笔距今>min_recency笔=过期
+        pts = detect_3rd(cs.c.zs_list, cs.c.bi_list,
+                         last_px=last_px, max_age_bars=self.min_recency)
         if not pts:
             return []
         # 近因过滤：只报最近 min_recency 笔内的信号（旧结构无操作意义）

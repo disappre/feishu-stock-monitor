@@ -60,9 +60,8 @@ def _reply_text(client, message_id: str, text: str) -> None:
     })
 
 
-def _reply_chan(client, message_id: str, code: str):
-    """缠论结构分析：生成结构图并回卡片（图+摘要）。"""
-    import json
+def _reply_chan(client, message_id: str, code: str, with_sublevel: bool = False):
+    """缠论结构分析：生成结构图并回卡片（图+摘要，可带次级别判断）。"""
     from pathlib import Path
     repo = Path(__file__).resolve().parents[2]
     sys.path.insert(0, str(repo / "tools"))
@@ -82,18 +81,29 @@ def _reply_chan(client, message_id: str, code: str):
         return
     png = plot_structure(cs)
     image_key = feishu_bot.upload_image(png)
+    elements = [
+        {"tag": "markdown", "content": cs.summary()},
+        {"tag": "markdown", "content":
+            "线段为特征序列分型简化实现（非完整算法）；"
+            "仅供学习研究，不构成投资建议"},
+    ]
+    if with_sublevel:
+        from stock_monitor.engine.sublevel import analyze_sublevel
+        sub = analyze_sublevel(code)
+        if sub:
+            emoji = {"反弹衰竭": "🔴", "回调企稳": "🟢", "中性": "⚪"}.get(sub.verdict, "⚪")
+            elements.append({"tag": "markdown",
+                             "content": f"{emoji} **次级别(30分钟)**：{sub.detail}"})
+        else:
+            elements.append({"tag": "markdown", "content": "次级别数据不足"})
+    if image_key:
+        elements.append({"tag": "img", "img_key": image_key,
+                         "alt": {"tag": "plain_text", "content": "缠论结构图"}})
     card = {
         "header": {"title": {"tag": "plain_text",
                              "content": f"{cs.name} {code} · 缠论结构"},
                    "template": "blue"},
-        "elements": [
-            {"tag": "markdown", "content": cs.summary()},
-            {"tag": "markdown", "content":
-                "线段为特征序列分型简化实现（非完整算法）；"
-                "仅供学习研究，不构成投资建议"},
-        ] + ([{"tag": "img", "img_key": image_key,
-               "alt": {"tag": "plain_text", "content": "缠论结构图"}}]
-             if image_key else []),
+        "elements": elements,
     }
     _reply_card(client, message_id, card)
 
@@ -121,14 +131,15 @@ def _handle(client, data) -> None:
     logger.info("收到消息: %r (chat=%s)", text[:40], msg.chat_id)
 
     # 缠论结构分析：消息含"缠论"或"chan" + 代码
-    if re.search(r"缠论|chan", text, re.I):
+    if re.search(r"缠论|chan|次级别", text, re.I):
         code = _extract_code(text)
         if code:
-            _reply_chan(client, msg_id, code)
+            _reply_chan(client, msg_id, code,
+                        with_sublevel=bool(re.search(r"次级别|sub", text, re.I)))
             return
         _reply_text(client, msg_id,
-                    "请发送 **缠论 + 6位代码**，例如 `缠论 600519`，"
-                    "我将返回缠论结构图（合并K线/笔/线段/中枢）。")
+                    "请发送 **缠论 + 6位代码**（日线结构图），或 **次级别 + 6位代码**"
+                    "（30分钟级别反弹/回调判断）。")
         return
 
     code = _extract_code(text)

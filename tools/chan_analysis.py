@@ -89,7 +89,9 @@ class ChanStructure:
         if divs:
             idx, kind, px, ratio = divs[-1]
             lines.append(f"- ⚠️ {kind}：第{idx}笔动能比{ratio}（MACD柱面积萎缩）")
-        pts = [p for p in detect_3rd_points(self.c.zs_list, self.c.bi_list) if p[0] >= recent_n]
+        pts = [p for p in detect_3rd_points(self.c.zs_list, self.c.bi_list,
+                                            last_px=self.c.bars_raw[-1].close,
+                                            max_age_bars=5) if p[0] >= recent_n]
         pts12 = [p for p in detect_1st_2nd_points(self.c.zs_list, self.c.bi_list,
                                                   self.segments, self.df)
                  if p[0] >= recent_n]
@@ -261,14 +263,31 @@ def detect_1st_2nd_points(zs_list, bi_list, segments, df: pd.DataFrame) -> list:
     return out
 
 
-def detect_3rd_points(zs_list, bi_list) -> list:
+def detect_3rd_points(zs_list, bi_list, last_px: float | None = None,
+                      max_age_bars: int | None = None) -> list:
     """三买/三卖检测（笔级近似次级别）：
     三买 = 向上笔离开中枢(端点>GG)后，回调笔低点不碰中枢上沿GG → 回调结束点
     三卖 = 向下笔离开中枢(端点<DD)后，反弹笔高点不碰中枢下沿DD → 反弹结束点
-    返回 [(bi_index, '三买'/'三卖', price), ...]【待验证，非多级别递归】
+
+    失效机制（2026-09-11用户指正后新增）：
+    - 价格回到任一中枢区间[DD,GG]内 → 信号失效（三卖后价格回中枢=反弹延续而非反转；
+      含用户指出的场景：旧中枢的三卖信号，价格已回到后续中枢内震荡）
+    - max_age_bars: 信号笔距当前超过N笔视为过期（旧结构无操作意义）
+
+    返回 [(bi_index, '三买'/'三卖', price), ...]；失效/过期信号自动剔除【待验证】
     """
     out = []
     if not zs_list or not bi_list:
+        return out
+    n = len(bi_list)
+    # 现价若处于任一中枢区间内，所有三买/三卖信号一律失效
+    in_any_zs = False
+    if last_px is not None:
+        for z in zs_list:
+            if z.dd <= last_px <= z.gg:
+                in_any_zs = True
+                break
+    if in_any_zs:
         return out
     for zs in zs_list:
         # 找中枢结束之后的笔
@@ -276,12 +295,15 @@ def detect_3rd_points(zs_list, bi_list) -> list:
             if str(bi.fx_a.dt)[:10] <= str(zs.edt)[:10]:
                 continue
             nxt = bi_list[i + 1]
+            idx = i + 1
+            if max_age_bars is not None and n - 1 - idx > max_age_bars:
+                break   # 信号过期
             if bi.direction == Direction.Up and bi.fx_b.fx > zs.gg \
                     and nxt.direction == Direction.Down and nxt.fx_b.fx > zs.gg:
-                out.append((bi_list.index(nxt), "三买", nxt.fx_b.fx))
+                out.append((idx, "三买", nxt.fx_b.fx))
             elif bi.direction == Direction.Down and bi.fx_b.fx < zs.dd \
                     and nxt.direction == Direction.Up and nxt.fx_b.fx < zs.dd:
-                out.append((bi_list.index(nxt), "三卖", nxt.fx_b.fx))
+                out.append((idx, "三卖", nxt.fx_b.fx))
             break   # 每个中枢只看其后的第一组离开-回抽
     return out
 
@@ -495,6 +517,8 @@ def main() -> int:
     ap = argparse.ArgumentParser()
     ap.add_argument("code", nargs="?", help="6位股票代码（单股模式）")
     ap.add_argument("--pool", action="store_true", help="全局模式：股票池缠论结构摘要")
+    ap.add_argument("--sub", action="store_true",
+                    help="全局模式下，对'日线中枢内'的股票附加30分钟次级别判断")
     ap.add_argument("--limit", type=int, default=30, help="全局模式取池前N只")
     ap.add_argument("--push", action="store_true", help="推送飞书")
     args = ap.parse_args()
@@ -512,10 +536,11 @@ def main() -> int:
             pos = ("中枢上" if zs and last_px > zs.gg else
                    "中枢下" if zs and last_px < zs.dd else "中枢内" if zs else "无中枢")
             seg = cs.segments[-1] if cs.segments else None
-            # 背驰/一二三类买卖点标记
+            # 背驰/一二三类买卖点标记（三买卖点带失效校验+有效期）
             tag = ""
             recent_n = len(cs.c.bi_list) - 5
-            pts = [p for p in detect_3rd_points(cs.c.zs_list, cs.c.bi_list) + 
+            pts = [p for p in detect_3rd_points(cs.c.zs_list, cs.c.bi_list,
+                                                 last_px=last_px, max_age_bars=5) +
                    detect_1st_2nd_points(cs.c.zs_list, cs.c.bi_list, cs.segments, cs.df)
                    if p[0] >= recent_n]
             if pts:
@@ -525,6 +550,19 @@ def main() -> int:
                 tag += f"⚠️{divs[-1][1]}"
             rows.append((code, name, str(bi.direction), pos,
                          "上段" if seg and seg[4] == 1 else "下段", last_px, tag))
+        # 次级别判断：日线中枢内的股票，方向下沉到30分钟结构
+        if args.sub:
+            from stock_monitor.engine.sublevel import analyze_sublevel
+            extra = []
+            for r in rows:
+                if r[3] == "中枢内":
+                    sub = analyze_sublevel(r[0])
+                    if sub and sub.verdict != "中性":
+                        extra.append((r, sub))
+            if extra:
+                lines.append("\n**次级别(30分钟)判断——日线中枢内个股：**")
+                for (r, sub) in extra:
+                    lines.append(f"- {r[1]} `{r[0]}`（现价{r[5]:.2f}）：{sub.detail}")
         lines = [f"**缠论全局摘要**（{len(rows)}只，笔方向/中枢位置/段方向/结构信号）"]
         for r in rows:
             lines.append(f"- {r[1]} `{r[0]}`：笔{r[2][-2:]}｜{r[3]}｜{r[4]}｜{r[5]:.2f} {r[6]}")
