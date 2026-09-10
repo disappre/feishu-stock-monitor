@@ -1,0 +1,64 @@
+# 监测标的与信号阈值配置（修改后无需改代码，下次扫描即生效）
+
+schedule:
+  intraday_interval_min: 5   # 盘中轮询间隔（分钟），个人使用建议 >=5，避免频控
+  close_scan_time: "15:30"   # 收盘后全量扫描时间
+
+# 选股清单来源：watchlist_files 指向的文本文件每次扫描前重新读取（改完即生效）
+watchlist_files:
+  - data/my_picks.txt
+
+# 内联清单（与文件合并；只做临时增补建议直接编辑 my_picks.txt）
+watchlist:
+  - { code: "600519", name: 贵州茅台 }
+  - { code: "300750", name: 宁德时代 }
+  - { code: "601318", name: 中国平安 }
+
+rules:
+  ma_cross:                  # 均线金叉/死叉
+    enabled: true
+    short: 5
+    long: 20
+  price_surge:               # 涨跌幅异动（%）
+    enabled: true
+    pct_threshold: 5.0
+  volume_surge:              # 成交量较前N日均量放大倍数
+    enabled: true
+    ratio_threshold: 2.0
+    baseline_days: 5
+  rsi:
+    enabled: true
+    period: 14
+    overbought: 80
+    oversold: 20
+  candle_div:                # Pin Bar/吞没形态 + RSI背离 双重确认（提炼自 MQL5 文章 17962）
+    enabled: true
+    rsi_period: 14
+    overbought: 70
+    oversold: 30
+    lookback_min: 5
+    lookback_max: 15
+  fractal_break:             # 分形突破 + EMA14/200趋势过滤（提炼自 MQL5 文章 18297）
+    enabled: true
+    ema_fast: 14
+    ema_slow: 200
+  pattern:                   # 形态识别（桥接 stock-api-master 的 TechnicalPatternRecognizer）
+    enabled: true
+    min_confidence: 0.7
+    skip_overlaps: ["金叉"]   # 与 rules_ma 重复的形态跳过，避免同日双推
+  pattern_cluster:           # ImprovedKMeans 聚类在线匹配（需先 tools/train_pattern_model.py）
+    enabled: true
+    window: 30
+    min_confidence: 0.6
+  pair_spread:               # 协整配对价差监测（需先 tools/find_pairs.py，建议每月重跑）
+    enabled: true
+    entry_z: 2.0             # 价差z-score触发阈值(σ)
+    exit_z: 0.3              # 回归参考位(σ)
+    lookback: 60             # z-score计算窗口(交易日)
+    long_leg_only: true      # 只输出"价差偏低的多头腿"信号(A股可执行口径)
+  chan_3rd:                  # 缠论三买/三卖（回测91.7%/88.9%双期稳定；一卖二卖已证伪不接）
+    enabled: true
+    min_recency: 3           # 只报最近N笔内的信号
+
+review:
+  forward_days: 5            # 复盘回填：信号后N个交易日的涨跌

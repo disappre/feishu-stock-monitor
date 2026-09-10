@@ -1,0 +1,14 @@
+akshare>=1.14.0
+pandas>=2.0
+numpy>=1.24
+PyYAML>=6.0
+requests>=2.31
+APScheduler>=3.10
+matplotlib>=3.8
+python-dotenv>=1.0
+# 飞书多维表格/图片上传（未配置凭证时相关功能自动降级跳过）
+lark-oapi>=1.4
+# LLM 解读（DeepSeek 等 OpenAI 兼容接口，未配置时回退原始信号说明）
+openai>=1.40
+statsmodels>=0.14   # 协整检验(EG/ADF, tools/find_pairs.py)
+czsc>=1.0           # 缠论结构分析(分型/笔/中枢/包含合并, tools/chan_analysis.py)

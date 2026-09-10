@@ -1,0 +1,26 @@
+# 凭证与本地环境，严禁入库
+.env
+
+# 运行时产物
+data/signal_records.json
+data/plots/
+__pycache__/
+*.pyc
+.pytest_cache/
+
+# 原文中转暂存，不入库（卡片与索引才进git）
+knowledge/archive/
+knowledge/inbox/
+
+# 本地行情库（可由 --sync-pool 重建，150MB级不入库）
+data/*.db
+# 回测中间产物（可由工具重跑）
+data/chan_backtest.json
+data/pairs_backtest.json
+data/threshold_tuning.json
+data/backtest_report.json
+data/pattern_model.json
+data/pairs.json
+
+# 飞书CLI自动安装的第三方技能（非项目本体）
+.agents/skills/lark-*/
