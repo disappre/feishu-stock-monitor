@@ -28,14 +28,12 @@ from stock_monitor.notify import trend_log  # noqa: E402
 
 
 def load_picks() -> list[tuple[str, str]]:
-    picks = []
-    pf = REPO / "data" / "my_picks.txt"
-    if pf.exists():
-        for line in pf.read_text(encoding="utf-8").splitlines():
-            parts = [p.strip() for p in line.split("#", 1)[0].split(",")]
-            if parts and parts[0].isdigit() and len(parts[0]) == 6:
-                picks.append((parts[0], parts[1] if len(parts) > 1 else parts[0]))
-    return picks
+    """自选股清单（含名称）。my_picks.txt已注册于config的watchlist_files，
+    load_watchlist自带名称补齐（缺名称条目查行情接口）。"""
+    import yaml
+    from stock_monitor.watchlist import load_watchlist
+    config = yaml.safe_load((REPO / "config" / "watchlist.yaml").read_text(encoding="utf-8"))
+    return list(load_watchlist(config).items())
 
 
 def main() -> int:

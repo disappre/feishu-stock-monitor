@@ -23,14 +23,11 @@ BASE = Path(__file__).resolve().parents[1]
 
 
 def load_picks() -> list[tuple[str, str]]:
-    picks = []
-    pf = BASE / "data" / "my_picks.txt"
-    if pf.exists():
-        for line in pf.read_text(encoding="utf-8").splitlines():
-            parts = [p.strip() for p in line.split("#", 1)[0].split(",")]
-            if parts and parts[0].isdigit() and len(parts[0]) == 6:
-                picks.append((parts[0], parts[1] if len(parts) > 1 else parts[0]))
-    return picks
+    """自选股清单（含名称补齐，见tools/log_daily_trend.load_picks）。"""
+    from .watchlist import load_watchlist
+    import yaml
+    config = yaml.safe_load((BASE / "config" / "watchlist.yaml").read_text(encoding="utf-8"))
+    return list(load_watchlist(config).items())
 
 
 def sublevel_signal(code: str, name: str) -> Signal | None:
