@@ -85,7 +85,7 @@ class ChanStructure:
                          f"GG {zs.gg:.2f} / DD {zs.dd:.2f}，现价{last_px:.2f}位于{pos}")
         # 背驰与三类买卖点（简化实现，只报最近5笔内的信号——旧结构信号无操作意义）
         recent_n = len(self.c.bi_list) - 5
-        divs = [d for d in detect_divergence(self.c.bi_list, self.df) if d[0] >= recent_n]
+        divs = [d for d in detect_divergence(self.c.bi_list, self.df, self.c.zs_list) if d[0] >= recent_n]
         if divs:
             idx, kind, px, ratio = divs[-1]
             lines.append(f"- ⚠️ {kind}：第{idx}笔动能比{ratio}（MACD柱面积萎缩）")
@@ -111,14 +111,20 @@ def macd(close: pd.Series, fast=12, slow=26, signal=9):
     return dif, dea, (dif - dea) * 2
 
 
-def detect_divergence(bi_list, df: pd.DataFrame, lookback: int = 6) -> list:
-    """简化背驰检测：最近lookback笔内，同向相邻两笔对比——
-    价格创新高/新低而MACD柱面积(笔区间内|hist|和)萎缩 → 顶/底背驰。
+def detect_divergence(bi_list, df: pd.DataFrame, zs_list=None, lookback: int = 8) -> list:
+    """笔级背驰检测（按原文第24/64课口径修正）：
+
+    原文要求：①比较对象=围绕同一中枢的进入段与离开段（b与c），不是任意相邻两笔；
+             ②结构前提=B段把MACD黄白线回拉0轴附近（两段间经过中枢）；
+             ③判定=离开段柱面积 < 进入段。
+    本实现的近似：取最近lookback笔中的同向笔对，要求两笔之间**存在至少一个中枢**
+    （即"经过中枢"的结构前提），且离开笔创新极值而MACD柱面积萎缩。
+
     返回 [(bi_index, '顶背驰'/'底背驰', price, area_ratio), ...]【待验证】
     """
     if len(bi_list) < 3 or df is None or len(df) < 40:
         return []
-    _, _, hist = macd(df["close"].astype(float))
+    dif, _, hist = macd(df["close"].astype(float))
     hist.index = df["date"].astype(str).str.slice(0, 10).tolist()
     out = []
     recent = bi_list[-lookback:]
@@ -126,11 +132,19 @@ def detect_divergence(bi_list, df: pd.DataFrame, lookback: int = 6) -> list:
         if a.direction != b.direction:
             continue
         up = a.direction == Direction.Up
-        # 价格是否创新极值
+        # 原文前提：两段之间须经过中枢（进入段与离开段围绕同一中枢）
+        if zs_list:
+            between_zs = any(
+                str(a.fx_b.dt)[:10] <= str(z.sdt)[:10] <= str(b.fx_a.dt)[:10]
+                or str(a.fx_b.dt)[:10] <= str(z.edt)[:10] <= str(b.fx_a.dt)[:10]
+                or (str(z.sdt)[:10] <= str(a.fx_b.dt)[:10] and str(z.edt)[:10] >= str(b.fx_a.dt)[:10])
+                for z in zs_list)
+            if not between_zs:
+                continue
         new_extreme = b.fx_b.fx > a.fx_b.fx if up else b.fx_b.fx < a.fx_b.fx
         if not new_extreme:
             continue
-        # 两笔区间内MACD柱面积
+        # 两笔区间内MACD柱面积（原文: 向上看红柱/向下看绿柱，简化为全柱面积）
         def area(bi):
             d0, d1 = str(bi.fx_a.dt)[:10], str(bi.fx_b.dt)[:10]
             seg = hist.loc[d0:d1]
@@ -266,8 +280,9 @@ def detect_1st_2nd_points(zs_list, bi_list, segments, df: pd.DataFrame) -> list:
 def detect_3rd_points(zs_list, bi_list, last_px: float | None = None,
                       max_age_bars: int | None = None) -> list:
     """三买/三卖检测（笔级近似次级别）：
-    三买 = 向上笔离开中枢(端点>GG)后，回调笔低点不碰中枢上沿GG → 回调结束点
-    三卖 = 向下笔离开中枢(端点<DD)后，反弹笔高点不碰中枢下沿DD → 反弹结束点
+    三买 = 向上笔离开中枢后，回调笔低点不跌破ZG（原文第20课定理：
+           "低点不跌破ZG"——比较对象是ZG中枢核心区间上沿，非GG波动上沿）→ 回调结束点
+    三卖 = 向下笔离开中枢后，反弹笔高点不升破ZD → 反弹结束点（镜像）
 
     失效机制（2026-09-11用户指正后新增）：
     - 价格回到任一中枢区间[DD,GG]内 → 信号失效（三卖后价格回中枢=反弹延续而非反转；
@@ -280,7 +295,7 @@ def detect_3rd_points(zs_list, bi_list, last_px: float | None = None,
     if not zs_list or not bi_list:
         return out
     n = len(bi_list)
-    # 现价若处于任一中枢区间内，所有三买/三卖信号一律失效
+    # 现价若处于任一中枢波动区间[DD,GG]内，所有三买/三卖信号一律失效
     in_any_zs = False
     if last_px is not None:
         for z in zs_list:
@@ -298,13 +313,14 @@ def detect_3rd_points(zs_list, bi_list, last_px: float | None = None,
             idx = i + 1
             if max_age_bars is not None and n - 1 - idx > max_age_bars:
                 break   # 信号过期
+            # 离开确认用波动区间(GG/DD), 回试确认用核心区间(ZG/ZD)——原文第20课口径
             if bi.direction == Direction.Up and bi.fx_b.fx > zs.gg \
-                    and nxt.direction == Direction.Down and nxt.fx_b.fx > zs.gg:
+                    and nxt.direction == Direction.Down and nxt.fx_b.fx > zs.zg:
                 out.append((idx, "三买", nxt.fx_b.fx))
             elif bi.direction == Direction.Down and bi.fx_b.fx < zs.dd \
-                    and nxt.direction == Direction.Up and nxt.fx_b.fx < zs.dd:
+                    and nxt.direction == Direction.Up and nxt.fx_b.fx < zs.zd:
                 out.append((idx, "三卖", nxt.fx_b.fx))
-            break   # 每个中枢只看其后的第一组离开-回抽
+            break   # 每个中枢只看其后的第一组离开-回抽（原文:必须是第一次回试）
     return out
 
 
@@ -530,7 +546,7 @@ def plot_structure(cs: ChanStructure, out: Path = None) -> Path:
     axm.plot(range(n), dea, color="#f76707", linewidth=0.9, label="DEA")
     axm.axhline(0, color="#868e96", linewidth=0.5)
     # 背驰标注：笔级背驰(副图橙色圆点+连线)与段级背驰(一买/一卖的组成,主图已有标签)
-    for idx, kind, px, ratio in detect_divergence(c.bi_list, df):
+    for idx, kind, px, ratio in detect_divergence(c.bi_list, df, c.zs_list):
         if idx >= len(c.bi_list):
             continue
         bi = c.bi_list[idx]
@@ -632,7 +648,7 @@ def main() -> int:
                    if p[0] >= recent_n]
             if pts:
                 tag = "⚠️" + "/".join(sorted({p[1] for p in pts}))
-            divs = detect_divergence(cs.c.bi_list, cs.df)
+            divs = detect_divergence(cs.c.bi_list, cs.df, cs.c.zs_list)
             if divs and divs[-1][0] >= recent_n:
                 tag += f"⚠️{divs[-1][1]}"
             rows.append((code, name, str(bi.direction), pos,
