@@ -53,6 +53,7 @@ class RuleEngine:
         from .rules_ma import MACrossRule
         from .rules_pair import PairSpreadRule
         from .rules_price import PriceSurgeRule, RSIRule, VolumeSurgeRule
+        from .rules_wolf import WolfGuardRule
 
         builders = {
             "ma_cross": MACrossRule,
@@ -64,6 +65,7 @@ class RuleEngine:
             "pattern_cluster": PatternClusterRule,
             "pair_spread": PairSpreadRule,
             "chan_3rd": ChanThirdPointRule,
+            "wolf_guard": WolfGuardRule,
         }
         rules: list[Rule] = []
         for key, params in rule_cfg.items():
@@ -84,4 +86,20 @@ class RuleEngine:
                 signals.extend(rule.check(code, name, kline))
             except Exception:
                 logger.exception("规则 %s 执行失败: %s", rule.name, code)
+        # 防狼术压制（缠师第103课）：危险区(DIF/DEA<0)内拦截买入类信号。
+        # 卖出/回避类(bearish)照常放行——危险区的离场提示更重要。
+        if any(s.signal_type == "wolf_guard_danger" for s in signals) \
+                and not self._wolf_only_flag():
+            kept = [s for s in signals
+                    if s.direction != "bullish" or s.signal_type == "wolf_guard_danger"]
+            dropped = len(signals) - len(kept)
+            if dropped:
+                logger.info("防狼术: %s 危险区压制 %d 条买入信号", code, dropped)
+            signals = kept
         return signals
+
+    def _wolf_only_flag(self) -> bool:
+        for r in self.rules:
+            if getattr(r, "name", "") == "wolf_guard":
+                return bool(getattr(r, "only_flag", False))
+        return True   # 未装配防狼术规则时不做压制

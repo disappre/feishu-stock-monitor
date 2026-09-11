@@ -41,6 +41,26 @@ def load_names() -> dict[str, str]:
     return names
 
 
+def baseline_negative_rate(frames: dict, fwd_days: int, lo: str, hi: str) -> float | None:
+    """全池基线：[lo,hi]日期区间内任意日入场的负收益占比（方向感知胜率的对照）。
+
+    裸胜率会被市场beta骗（普跌期所有bearish信号胜率都虚高），alpha=
+    信号胜率 - 同期基线负收益占比 才是真实预测力。
+    """
+    import numpy as np
+    rets = []
+    for k in frames.values():
+        k = k.reset_index(drop=True)
+        c, o = k["close"].to_numpy(float), k["open"].to_numpy(float)
+        d = k["date"].astype(str)
+        for i in range(1, len(k) - fwd_days):
+            if lo <= d.iloc[i] <= hi and o[i + 1] > 0:
+                rets.append(c[i + fwd_days] / o[i + 1] - 1)
+    if not rets:
+        return None
+    return float(np.mean(np.array(rets) < 0))
+
+
 def main() -> int:
     ap = argparse.ArgumentParser()
     ap.add_argument("--fwd-days", type=int, default=None,
@@ -78,28 +98,38 @@ def main() -> int:
 
     report = backtest_rules(rules, frames, names, fwd_days, args.train_ratio)
 
+    # 基线对照：alpha = 测试期胜率 - 同期全池负收益占比（裸胜率会被窗口beta骗）
+    split_date = next(iter(report.values())).get("split_date", "") if report else ""
+    base_full = baseline_negative_rate(frames, fwd_days, "0000-01-01", "9999-12-31")
+    base_test = baseline_negative_rate(frames, fwd_days,
+                                       "9999-12-31" if not split_date else split_date,
+                                       "9999-12-31") if split_date else None
+
     payload = {
         "generated_at": datetime.now().isoformat(timespec="seconds"),
         "fwd_days": fwd_days, "train_ratio": args.train_ratio,
         "n_stocks": len(frames), "config_source": "watchlist.yaml(当前生效配置)",
+        "baseline_neg_rate_full": round(base_full, 3) if base_full is not None else None,
+        "baseline_neg_rate_test": round(base_test, 3) if base_test is not None else None,
         "results": report,
     }
     OUT.write_text(json.dumps(payload, ensure_ascii=False, indent=1), encoding="utf-8")
 
-    print(f"\n{'规则':<14}{'信号类型':<26}{'全样本n':>7}{'胜率':>7}{'均值%':>8}"
-          f"{'训练n':>7}{'训练胜率':>8}{'测试n':>7}{'测试胜率':>8}")
+    print(f"\n基线(全池任意日负收益占比): 全样本={base_full:.1%}"
+          + (f" 测试期={base_test:.1%}" if base_test is not None else ""))
+    print(f"{'规则':<14}{'信号类型':<26}{'全n':>6}{'胜率':>7}{'均值%':>8}"
+          f"{'测n':>6}{'测胜率':>8}{'测alpha':>8}{'测均值':>8}")
     for rule_name, r in report.items():
-        for section in ("full", "train", "test"):
-            for stype, s in r[section].items():
-                row = [f"{s['n']}", f"{s['win_rate']:.1%}", f"{s['mean_fwd_pct']:+.2f}"]
-                if section == "full":
-                    print(f"{rule_name:<14}{stype:<26}{row[0]:>7}{row[1]:>7}{row[2]:>8}",
-                          end="")
-                else:
-                    tag = "train" if section == "train" else "test"
-                    print(f"{row[0]:>8}({tag}){row[1]:>9}", end=" " if section == "train" else "\n")
-        if not r["full"]:
-            print(f"{rule_name:<14}(无信号)")
+        for stype, s in r["full"].items():
+            te = r["test"].get(stype)
+            alpha = ""
+            if te and base_test is not None:
+                a = te["win_rate"] - base_test
+                alpha = f"{a:+.1%}"
+            print(f"{rule_name:<14}{stype:<26}{s['n']:>6}{s['win_rate']:>7.1%}"
+                  f"{s['mean_fwd_pct']:>+8.2f}"
+                  f"{(te or {}).get('n', 0):>6}{(te or {}).get('win_rate', 0):>8.1%}"
+                  f"{alpha:>8}{(te or {}).get('mean_fwd_pct', 0):>+8.2f}")
     print(f"\n报告已写入: {OUT}")
     return 0
 

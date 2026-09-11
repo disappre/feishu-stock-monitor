@@ -72,6 +72,8 @@ def main():
                         help="仅从 SQLite 本地库筛选，不发起任何行情请求")
     parser.add_argument("--sync-pool", action="store_true",
                         help="同步股票池已收盘日线到 SQLite（不做筛选）")
+    parser.add_argument("--sublevel", action="store_true",
+                        help="对自选股做30分钟次级别扫描并推送（反弹衰竭/回调企稳）")
     parser.add_argument("--workers", type=int, default=4,
                         help="全池同步的网络线程数（默认4）")
     parser.add_argument("--pool-limit", type=int, default=None,
@@ -85,6 +87,10 @@ def main():
         from .screener import load_pool
         from .sync import sync_pool
         sync_pool(load_pool(args.pool_limit), workers=args.workers)
+        return
+    if args.sublevel:
+        from .sublevel_alert import scan_sublevel
+        scan_sublevel(push=True)
         return
     if args.screen or args.screen_local:
         from .screener import run_screening

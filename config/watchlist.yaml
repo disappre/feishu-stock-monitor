@@ -59,6 +59,9 @@ rules:
   chan_3rd:                  # 缠论三买/三卖（回测91.7%/88.9%双期稳定；一卖二卖已证伪不接）
     enabled: true
     min_recency: 3           # 只报最近N笔内的信号
+  wolf_guard:                # 防狼术（缠师第103课）：DIF/DEA均在0轴下=危险区
+    enabled: true
+    only_flag: false         # true=仅状态提示不压制买入信号（观察模式）
 
 review:
   forward_days: 5            # 复盘回填：信号后N个交易日的涨跌
