@@ -556,6 +556,28 @@ def plot_structure(cs: ChanStructure, out: Path = None) -> Path:
                      ha="center", fontsize=6.5, color="#e8590c", fontweight="bold",
                      arrowprops=dict(arrowstyle="->", color="#e8590c", lw=0.7))
 
+    # ── 主力趋势辨别色带（八阶段量价规则，主图顶部） ──
+    from stock_monitor.engine.mainforce import STAGES, classify_stage, stage_series
+    mf = classify_stage(df)
+    if mf is not None:
+        ss = stage_series(df)
+        y0, y1 = ax.get_ylim()
+        band_h = (y1 - y0) * 0.035
+        band_top = y1 - band_h * 2.2
+        for i in range(min(n, len(ss))):
+            stg = int(ss["stage"].iloc[i])
+            if stg == 0:
+                continue
+            _, _, _, color, _ = STAGES[stg]
+            ax.add_patch(Rectangle((i - 0.5, band_top), 1, band_h,
+                                   facecolor=color, edgecolor="none",
+                                   zorder=6, alpha=0.85))
+        ax.annotate(f"主力: {mf.action}｜{mf.advice}",
+                    (n * 0.98, band_top - band_h * 1.4),
+                    ha="right", fontsize=8.5, fontweight="bold", color=mf.color,
+                    bbox=dict(boxstyle="round,pad=0.3", fc="white",
+                              ec=mf.color, alpha=0.9), zorder=8)
+
     # ── 图例（主图）──
     from matplotlib.lines import Line2D
     from matplotlib.patches import Patch
