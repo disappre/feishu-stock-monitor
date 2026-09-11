@@ -55,6 +55,8 @@ def scan_all() -> int:
                     image_key = feishu_bot.upload_image(png)
                 feishu_bot.signal_to_card(signal, image_key)
                 append_signal(signal)  # 多维表格流水（未配置时静默跳过）
+                from .notify import trend_log
+                trend_log.log_signal(signal)   # 股票走势记录表（lark-cli降级安全）
                 count += 1
                 logger.info("已推送: %s", signal.title)
             except Exception:
@@ -111,6 +113,13 @@ def main():
         from .sync import sync_pool
         sync_pool(load_pool(), workers=4)
         run_screening(CONFIG, local_only=True)
+        # 走势快照写多维表格（自选股；lark-cli不可用时静默跳过）
+        try:
+            import subprocess, sys as _sys
+            subprocess.run([_sys.executable, str(Path(__file__).parents[1] / "tools" / "log_daily_trend.py"),
+                            "--chan"], timeout=600)
+        except Exception:
+            logging.getLogger("monitor").warning("走势快照写入跳过", exc_info=True)
 
     # 收盘后先落库，再纯本地扫描；不让筛选阶段依赖外部数据源。
     sched.add_job(sync_then_screen, "cron", day_of_week="mon-fri",
