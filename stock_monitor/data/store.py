@@ -35,13 +35,22 @@ def initialize(db_path: Path | str = DB_PATH) -> None:
         pass
 
 
+MARKET_CLOSE = (15, 5)   # A股15:00收盘，留5分钟数据落地缓冲
+
+
 def _closed_rows(df: pd.DataFrame, now: datetime | None = None) -> list[tuple]:
-    today = (now or datetime.now()).strftime("%Y-%m-%d")
+    """筛选已收盘K线。当日bar在收盘时刻（15:05）后才算定案入库——
+    修复bug：此前date>=today一律跳过，收盘后重新同步也永远缺当日数据。"""
+    now = now or datetime.now()
+    today = now.strftime("%Y-%m-%d")
+    today_closed = (now.hour, now.minute) >= MARKET_CLOSE
     rows = []
     for _, r in df.iterrows():
         date = str(r["date"])[:10]
-        if date >= today:
-            continue
+        if date > today:
+            continue                      # 未来数据不可能
+        if date == today and not today_closed:
+            continue                      # 盘中未收盘，不落库
         rows.append((date, float(r["open"]), float(r["close"]), float(r["high"]),
                      float(r["low"]), float(r["volume"]), float(r.get("amount", 0) or 0)))
     return rows

@@ -54,15 +54,17 @@ def _cache_load(code: str, upto: str) -> pd.DataFrame | None:
 
 
 def _cache_save(code: str, df: pd.DataFrame) -> None:
-    """落库（只写已收盘的K线：跳过最后一根，若它就是今天的实时bar）。"""
+    """落库（只写已收盘的K线；当日bar在15:05收盘缓冲后才入库）。"""
     if df is None or df.empty:
         return
-    today = datetime.now().strftime("%Y-%m-%d")
+    now = datetime.now()
+    today = now.strftime("%Y-%m-%d")
+    today_closed = (now.hour, now.minute) >= (15, 5)
     rows = []
     for _, r in df.iterrows():
         d = str(r["date"])[:10]
-        if d >= today:
-            continue  # 未收盘的不落库
+        if d > today or (d == today and not today_closed):
+            continue  # 未来/盘中未收盘的不落库
         rows.append((code, d, float(r["open"]), float(r["close"]),
                      float(r["high"]), float(r["low"]),
                      float(r["volume"]), float(r.get("amount", 0) or 0)))

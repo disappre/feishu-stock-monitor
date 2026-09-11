@@ -16,14 +16,20 @@ def frame(dates):
 
 def test_save_excludes_today_and_is_idempotent(tmp_path):
     db = tmp_path / "cache.db"
-    now = datetime(2026, 9, 9, 16, 0)
     df = frame(["2026-09-07", "2026-09-08", "2026-09-09"])
-    assert store.save_confirmed("600519", df, "test", db, now) == 2
-    assert store.save_confirmed("600519", df, "test", db, now) == 2
+    # 盘中(14:00<15:05): 当日bar未收盘,不入库
+    midday = datetime(2026, 9, 9, 14, 0)
+    assert store.save_confirmed("600519", df, "test", db, midday) == 2
+    assert store.save_confirmed("600519", df, "test", db, midday) == 2  # 幂等
     cached = store.load_recent("600519", 10, db)
     assert list(cached["date"]) == ["2026-09-07", "2026-09-08"]
     state = store.status(["600519"], db)["600519"]
     assert state["status"] == "ok" and state["last_trade_date"] == "2026-09-08"
+    # 收盘后(16:00>15:05): 当日bar定案入库
+    evening = datetime(2026, 9, 9, 16, 0)
+    assert store.save_confirmed("600519", df, "test", db, evening) == 3
+    cached = store.load_recent("600519", 10, db)
+    assert list(cached["date"]) == ["2026-09-07", "2026-09-08", "2026-09-09"]
 
 
 def test_load_many_limits_and_groups(tmp_path):
