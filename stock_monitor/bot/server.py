@@ -158,8 +158,27 @@ def _handle(client, data) -> None:
         _reply_text(client, msg_id,
                     f"未取到 `{code}` 的行情数据，请确认代码是否正确。")
         return
-    _reply_card(client, msg_id, build_card(res))
-    logger.info("已回复分析: %s %s", res["name"], res["code"])
+    # 附带K线图：缠论全要素结构图（K线+笔+线段+中枢+买卖点，即最丰富的K线视图）
+    image_key = None
+    try:
+        from pathlib import Path as _P
+        import sys as _sys
+        _sys.path.insert(0, str(_P(__file__).resolve().parents[2] / "tools"))
+        from chan_analysis import analyze as _ca, plot_structure as _ps
+        cs = _ca(code, res["name"])
+        if cs is not None:
+            png = _ps(cs)
+            from stock_monitor.notify import feishu_bot
+            image_key = feishu_bot.upload_image(png)
+    except Exception:
+        logger.exception("K线图生成失败 %s", code)
+    card = build_card(res)
+    if image_key:
+        card["elements"].insert(-1, {
+            "tag": "img", "img_key": image_key,
+            "alt": {"tag": "plain_text", "content": "K线缠论结构图"}})
+    _reply_card(client, msg_id, card)
+    logger.info("已回复分析(+K线图: %s): %s %s", bool(image_key), res["name"], res["code"])
 
 
 def main():
