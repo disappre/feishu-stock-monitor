@@ -37,12 +37,29 @@ def _load_chan():
 
 
 class ChanThirdPointRule:
-    """三买/三卖检测（笔级近似次级别，保守+1根确认）。"""
+    """三买/三卖检测（笔级近似次级别，保守+1根确认）。
+
+    direction_gate: 方向门控（默认开）——只发"顺日线段方向"的信号：
+    三买须在向上段内、三卖须在向下段内。实证（300只×2年）：
+    顺段三买93.0% vs 逆段82.6%，10.4pt增量；逆段绝对水平仍超基线，
+    故此门控是优化项而非必须（见知识卡"三级分工判决"）。
+    """
     name = "chan_3rd"
 
     def __init__(self, params: dict):
         self.min_recency = int(params.get("min_recency", 3))
+        self.direction_gate = bool(params.get("direction_gate", True))
         self._cache: dict[str, object] = {}   # code -> ChanStructure（进程内）
+
+    def _seg_dir_of(self, cs, bi_idx: int) -> int:
+        """信号笔所在日线段方向: 1=向上 -1=向下 0=无。"""
+        if not cs.segments or bi_idx >= len(cs.c.bi_list):
+            return 0
+        d = str(cs.c.bi_list[bi_idx].fx_b.dt)[:10]
+        for (sdt, spx, edt, epx, sdir) in cs.segments:
+            if str(sdt)[:10] <= d <= str(edt)[:10]:
+                return sdir
+        return 0
 
     def _get_cs(self, code: str, name: str):
         if code not in self._cache:
@@ -72,6 +89,11 @@ class ChanThirdPointRule:
             if idx < recent:
                 continue
             is_buy = kind == "三买"
+            # 方向门控：三买须在向上段、三卖须在向下段（可配置关闭）
+            if self.direction_gate:
+                sd = self._seg_dir_of(cs, idx)
+                if (is_buy and sd != 1) or ((not is_buy) and sd != -1):
+                    continue
             zs = cs.c.zs_list[-1] if cs.c.zs_list else None
             zs_desc = (f"中枢GG {zs.gg:.2f}/DD {zs.dd:.2f}" if zs else "无中枢")
             signals.append(Signal(

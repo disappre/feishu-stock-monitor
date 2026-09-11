@@ -56,9 +56,10 @@ rules:
     exit_z: 0.3              # 回归参考位(σ)
     lookback: 60             # z-score计算窗口(交易日)
     long_leg_only: true      # 只输出"价差偏低的多头腿"信号(A股可执行口径)
-  chan_3rd:                  # 缠论三买/三卖（回测91.7%/88.9%双期稳定；一卖二卖已证伪不接）
+  chan_3rd:                  # 缠论三买/三卖（alpha审判+40.5%；一卖二卖已证伪不接）
     enabled: true
     min_recency: 3           # 只报最近N笔内的信号
+    direction_gate: true     # 方向门控：只发顺日线段方向的信号(顺段93.0%vs逆段82.6%)
   wolf_guard:                # 防狼术（缠师第103课）：DIF/DEA均在0轴下=危险区
     enabled: true
     only_flag: false         # true=仅状态提示不压制买入信号（观察模式）

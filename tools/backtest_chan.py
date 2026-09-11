@@ -52,8 +52,9 @@ def main() -> int:
     frames = store.load_many(codes)
     print(f"回测: {len(codes)}只, 前瞻{args.fwd_days}日", flush=True)
 
-    # (kind, date, direction, fwd_ret)
+    # (kind, date, direction, fwd_ret) + 方向门控分组：信号是否顺日线段方向
     records = []
+    records_gated = []     # (record, aligned: bool) aligned=顺日线段方向
     for n, (code, name) in enumerate(names.items()):
         if code not in frames or frames[code] is None or len(frames[code]) < 60:
             continue
@@ -68,6 +69,14 @@ def main() -> int:
         close = kline["close"].to_numpy(float)
         open_ = kline["open"].to_numpy(float)
         dmap = {d: i for i, d in enumerate(dates)}
+
+        def seg_dir_at(di) -> int:
+            """信号日的日线段方向: 1=向上, -1=向下, 0=无"""
+            for (sdt, spx, edt, epx, sdir) in cs.segments:
+                if str(sdt)[:10] <= dates[di] <= str(edt)[:10]:
+                    return sdir
+            return 0
+
         for bi_idx, kind, px in pts:
             if bi_idx >= len(cs.c.bi_list):
                 continue
@@ -79,11 +88,17 @@ def main() -> int:
             if entry <= 0:
                 continue
             ret = (exit_ / entry - 1) * 100
-            records.append(BacktestRecord(
+            rec = BacktestRecord(
                 code=code, date=dates[i],
                 signal_type=f"chan_{kind}",
                 direction="bullish" if kind in BUY_KINDS else "bearish",
-                fwd_ret=ret))
+                fwd_ret=ret)
+            records.append(rec)
+            # 方向门控: 买点顺向上段=aligned; 卖点顺向下段=aligned
+            sd = seg_dir_at(i)
+            is_buy = kind in BUY_KINDS
+            aligned = (is_buy and sd == 1) or ((not is_buy) and sd == -1)
+            records_gated.append((rec, aligned))
         if (n + 1) % 50 == 0:
             print(f"  进度 {n + 1}/{len(names)}, 信号{len(records)}", flush=True)
 
@@ -112,15 +127,59 @@ def main() -> int:
         "full": summarize(records), "train": summarize(train),
         "test": summarize(test),
     }
+
+    # ── alpha审判：基线（全池任意日负收益占比） ──
+    def baseline_neg_rate(lo: str, hi: str):
+        import numpy as np
+        rets = []
+        for k in frames.values():
+            k = k.reset_index(drop=True)
+            c, o = k["close"].to_numpy(float), k["open"].to_numpy(float)
+            d = k["date"].astype(str)
+            for i in range(1, len(k) - args.fwd_days):
+                if lo <= d.iloc[i] <= hi and o[i + 1] > 0:
+                    rets.append(c[i + args.fwd_days] / o[i + 1] - 1)
+        return float(np.mean(np.array(rets) < 0)) if rets else None
+
+    base_test = baseline_neg_rate(split_date, "9999-12-31")
+    base_full = baseline_neg_rate("0000-01-01", "9999-12-31")
+    result["baseline_neg_rate_test"] = round(base_test, 3) if base_test else None
+    result["baseline_neg_rate_full"] = round(base_full, 3) if base_full else None
+
+    # ── 方向门控分组：顺/逆日线段方向的信号质量对比（三级分工体系检验） ──
+    def gated_stats(recs_g):
+        groups = {}
+        for r, aligned in recs_g:
+            key = f"{'顺' if aligned else '逆'}段·{r.signal_type.replace('chan_', '')}"
+            groups.setdefault(key, []).append(r)
+        out = {}
+        for key, items in sorted(groups.items()):
+            wins = sum(1 for r in items if r.is_win)
+            rets = [r.fwd_ret for r in items]
+            out[key] = {"n": len(items), "win_rate": round(wins / len(items), 3),
+                        "mean_pct": round(sum(rets) / len(rets), 3)}
+        return out
+
+    test_g = [rg for rg in records_gated if rg[0].date > split_date]
+    result["gated_full"] = gated_stats(records_gated)
+    result["gated_test"] = gated_stats(test_g)
+
     OUT.write_text(json.dumps(result, ensure_ascii=False, indent=1), encoding="utf-8")
-    print(f"\n{'信号':<8}{'全n':>5}{'全胜率':>8}{'全均值':>8}"
-          f"{'训n':>5}{'训胜率':>8}{'测n':>5}{'测胜率':>8}{'测均值':>8}")
+    print(f"\n基线(负收益占比): 全样本={base_full:.1%} 测试期={base_test:.1%}")
+    print(f"\n{'信号':<8}{'全n':>5}{'全胜率':>8}{'全alpha':>8}"
+          f"{'测n':>5}{'测胜率':>8}{'测alpha':>8}{'测均值':>8}")
     for kind in result["full"]:
-        f, tr, te = result["full"][kind], result["train"].get(kind), result["test"].get(kind)
-        print(f"{kind:<8}{f['n']:>5}{f['win_rate']:>8.1%}{f['mean_pct']:>+8.2f}"
-              f"{(tr or {}).get('n', 0):>5}{(tr or {}).get('win_rate', 0):>8.1%}"
+        f, te = result["full"][kind], result["test"].get(kind)
+        fa = f["win_rate"] - base_full if base_full else 0
+        ta = (te["win_rate"] - base_test) if te and base_test else 0
+        print(f"{kind:<8}{f['n']:>5}{f['win_rate']:>8.1%}{fa:>+8.1%}"
               f"{(te or {}).get('n', 0):>5}{(te or {}).get('win_rate', 0):>8.1%}"
-              f"{(te or {}).get('mean_pct', 0):>+8.2f}")
+              f"{ta:>+8.1%}{(te or {}).get('mean_pct', 0):>+8.2f}")
+    print(f"\n── 方向门控分组（顺/逆日线段方向，三级分工检验）──")
+    print(f"{'分组':<16}{'全n':>5}{'全胜率':>8}{'测n':>5}{'测胜率':>8}")
+    for key, s in result["gated_full"].items():
+        t = result["gated_test"].get(key, {"n": 0, "win_rate": 0})
+        print(f"{key:<16}{s['n']:>5}{s['win_rate']:>8.1%}{t['n']:>5}{t['win_rate']:>8.1%}")
     print(f"\n报告: {OUT}")
     return 0
 
