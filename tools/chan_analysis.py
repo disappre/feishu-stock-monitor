@@ -419,32 +419,16 @@ def merge_groups(bars_df: pd.DataFrame) -> list:
 
 
 def plot_structure(cs: ChanStructure, out: Path = None) -> Path:
+    """缠论全要素结构图：K线+合并框+分型+笔+线段+中枢+MACD背驰+六类买卖点。
+
+    布局：上方主图（价格结构，占2/3高度），下方副图（MACD柱+背驰标注，占1/3）。
+    """
     c = cs.c
-    # 画全部原始K线（不吞并），可合并的组用框标出；与分析严格同源
     df = cs.df if cs.df is not None else store.load_recent(cs.code)
     n = len(df)
     dates = [str(d)[:10] for d in df["date"]]
     date_index = {d: i for i, d in enumerate(dates)}
-    fig, ax = plt.subplots(figsize=(13, 6), dpi=130)
 
-    # 原始K线蜡烛
-    for i, (_, r) in enumerate(df.iterrows()):
-        color = UP if r["close"] >= r["open"] else DOWN
-        ax.plot([i, i], [r["low"], r["high"]], color=color, linewidth=0.6,
-                zorder=1, alpha=0.85)
-        ax.add_patch(plt.Rectangle((i - 0.34, min(r["open"], r["close"])), 0.68,
-                                   max(abs(r["close"] - r["open"]), 1e-9),
-                                   facecolor=color, edgecolor=color, zorder=2, alpha=0.85))
-
-    # 包含关系分组框：≥2根的组画框（合并后的最小单位区间）
-    groups = merge_groups(df)
-    merged_units = [g for g in groups if g[1] > g[0]]
-    for (s, e, hi, lo) in merged_units:
-        ax.add_patch(Rectangle((s - 0.45, lo), (e - s) + 0.9, max(hi - lo, 1e-9),
-                               fill=False, edgecolor="#495057", linewidth=0.9,
-                               linestyle="-", zorder=3, alpha=0.75))
-
-    # 笔（细线）: fx的dt映射到原始K线索引（组内取组末，找不到则就近）
     def x_of(dt):
         key = str(dt)[:10]
         if key in date_index:
@@ -454,36 +438,139 @@ def plot_structure(cs: ChanStructure, out: Path = None) -> Path:
         j = bisect.bisect_left(keys, key)
         return date_index[keys[min(j, len(keys) - 1)]]
 
+    fig, (ax, axm) = plt.subplots(
+        2, 1, figsize=(14, 9), dpi=130, sharex=True,
+        gridspec_kw={"height_ratios": [2.6, 1.0]})
+
+    # ── 主图：原始K线 ──
+    for i, (_, r) in enumerate(df.iterrows()):
+        color = UP if r["close"] >= r["open"] else DOWN
+        ax.plot([i, i], [r["low"], r["high"]], color=color, linewidth=0.6,
+                zorder=1, alpha=0.85)
+        ax.add_patch(plt.Rectangle((i - 0.34, min(r["open"], r["close"])), 0.68,
+                                   max(abs(r["close"] - r["open"]), 1e-9),
+                                   facecolor=color, edgecolor=color, zorder=2, alpha=0.85))
+
+    # 包含合并框（可合并成最小单位的K线组）
+    groups = merge_groups(df)
+    merged_units = [g for g in groups if g[1] > g[0]]
+    for (s, e, hi, lo) in merged_units:
+        ax.add_patch(Rectangle((s - 0.45, lo), (e - s) + 0.9, max(hi - lo, 1e-9),
+                               fill=False, edgecolor="#495057", linewidth=0.8,
+                               zorder=3, alpha=0.6))
+
+    # 分型标记：顶分型▲(预示短期下跌)/底分型▼(预示短期上涨)——只画构成笔端点的分型
+    for bi in c.bi_list:
+        for fx, mark in ((bi.fx_a, "a"), (bi.fx_b, "b")):
+            x = x_of(fx.dt)
+            if mark == "a" and bi.fx_a == bi.fx_b:
+                continue
+        # 用fx.mark类型判断顶底
+    for fx in c.fx_list:
+        x = x_of(fx.dt)
+        is_top = "顶" in str(fx.mark) or "g" in str(fx.mark).lower()
+        color = "#e8590c" if is_top else "#0b7285"
+        # 顶分型标记在上方, 底分型在下方
+        if is_top:
+            ax.annotate("▲", (x, fx.fx), xytext=(0, 7), textcoords="offset points",
+                        ha="center", fontsize=4.5, color=color, zorder=6)
+        else:
+            ax.annotate("▼", (x, fx.fx), xytext=(0, -11), textcoords="offset points",
+                        ha="center", fontsize=4.5, color=color, zorder=6)
+
+    # 笔（蓝色细线）
     for bi in c.bi_list:
         ax.plot([x_of(bi.fx_a.dt), x_of(bi.fx_b.dt)],
                 [bi.fx_a.fx, bi.fx_b.fx],
                 color="#1c7ed6", linewidth=1.0, zorder=4, alpha=0.9)
-    # 线段（粗线，橙）
+    # 线段（橙色粗线）
     for (sdt, spx, edt, epx, sdir) in cs.segments:
         ax.plot([x_of(sdt), x_of(edt)], [spx, epx], color="#f76707",
                 linewidth=2.4, zorder=5, alpha=0.95)
-    # 中枢（半透明矩形：ZG~ZD区间）
+    # 中枢（紫色半透明矩形 + GG/DD虚线）
     for zs in c.zs_list:
         x0, x1 = x_of(zs.sdt), x_of(zs.edt)
         ax.add_patch(Rectangle((x0, min(zs.zd, zs.zg)), max(x1 - x0, 1),
                                abs(zs.zg - zs.zd) or 0.5,
                                facecolor="#748ffc", alpha=0.25, zorder=0))
-    # 图例
+        ax.hlines([zs.gg, zs.dd], x0, x1, colors="#4263eb",
+                  linestyles=":", linewidth=0.9, zorder=0, alpha=0.8)
+
+    # 六类买卖点标记（主图大标签）
+    pts = (detect_1st_2nd_points(c.zs_list, c.bi_list, cs.segments, df)
+           + detect_3rd_points(c.zs_list, c.bi_list))
+    KIND_STYLE = {  # kind -> (买/卖, 颜色)
+        "一买": ("b", "#2f9e44"), "二买": ("b", "#40c057"), "最强二买": ("b", "#69db7c"),
+        "三买": ("b", "#37b24d"), "一卖": ("s", "#c92a2a"), "二卖": ("s", "#e03131"),
+        "最强二卖": ("s", "#ff6b6b"), "三卖": ("s", "#f03e3e")}
+    seen_kinds = set()
+    for idx, kind, px in pts:
+        if idx >= len(c.bi_list):
+            continue
+        side, color = KIND_STYLE.get(kind, ("b", "#495057"))
+        x = x_of(c.bi_list[idx].fx_b.dt)
+        if side == "b":   # 买点：绿色标记在下方
+            ax.annotate(kind, (x, px), xytext=(0, -16), textcoords="offset points",
+                        ha="center", fontsize=7, fontweight="bold", color="white",
+                        bbox=dict(boxstyle="round,pad=0.22", fc=color, ec="none",
+                                  alpha=0.92), zorder=8)
+        else:             # 卖点：红色标记在上方
+            ax.annotate(kind, (x, px), xytext=(0, 12), textcoords="offset points",
+                        ha="center", fontsize=7, fontweight="bold", color="white",
+                        bbox=dict(boxstyle="round,pad=0.22", fc=color, ec="none",
+                                  alpha=0.92), zorder=8)
+        seen_kinds.add(kind)
+
+    # ── 副图：MACD + 背驰标注 ──
+    dif, dea, hist = macd(df["close"].astype(float))
+    hist_idx = df["close"].astype(float).index
+    axm.bar(range(n), hist, width=0.7,
+            color=[UP if v >= 0 else DOWN for v in hist], alpha=0.75)
+    axm.plot(range(n), dif, color="#1c7ed6", linewidth=0.9, label="DIF")
+    axm.plot(range(n), dea, color="#f76707", linewidth=0.9, label="DEA")
+    axm.axhline(0, color="#868e96", linewidth=0.5)
+    # 背驰标注：笔级背驰(副图橙色圆点+连线)与段级背驰(一买/一卖的组成,主图已有标签)
+    for idx, kind, px, ratio in detect_divergence(c.bi_list, df):
+        if idx >= len(c.bi_list):
+            continue
+        bi = c.bi_list[idx]
+        x = x_of(bi.fx_b.dt)
+        axm.annotate(f"{kind}({ratio})", (x, hist.iloc[x] if x < len(hist) else 0),
+                     xytext=(0, 14 if "顶" in kind else -18), textcoords="offset points",
+                     ha="center", fontsize=6.5, color="#e8590c", fontweight="bold",
+                     arrowprops=dict(arrowstyle="->", color="#e8590c", lw=0.7))
+
+    # ── 图例（主图）──
     from matplotlib.lines import Line2D
-    legend = [Line2D([0], [0], color="#e03131", lw=6, label="原始K线"),
-              Line2D([0], [0], color="#495057", lw=1.5, label=f"包含合并框({len(merged_units)}个最小单位)"),
-              Line2D([0], [0], color="#1c7ed6", lw=1.5, label="笔"),
-              Line2D([0], [0], color="#f76707", lw=2.5, label="线段(特征序列简化)"),
-              Line2D([0], [0], color="#748ffc", lw=6, alpha=0.4, label="中枢[ZD,ZG]")]
-    ax.legend(handles=legend, loc="upper left", fontsize=8, framealpha=0.8)
+    from matplotlib.patches import Patch
+    legend_main = [Line2D([0], [0], color="#e03131", lw=6, label="原始K线"),
+                   Line2D([0], [0], color="#495057", lw=1.4,
+                          label=f"包含合并框({len(merged_units)}组)"),
+                   Line2D([0], [0], marker="^", color="none", markerfacecolor="#e8590c",
+                          markersize=6, label="顶分型▲/底分型▼"),
+                   Line2D([0], [0], color="#1c7ed6", lw=1.5, label="笔"),
+                   Line2D([0], [0], color="#f76707", lw=2.5, label="线段"),
+                   Patch(facecolor="#748ffc", alpha=0.4, label="中枢[ZD,ZG]+GG/DD虚线")]
+    # 买卖点图例只显示实际出现的类别
+    for kind in ["一买", "二买", "三买", "一卖", "二卖", "三卖"]:
+        if kind in seen_kinds or f"最强{kind}" in seen_kinds:
+            side, color = KIND_STYLE.get(kind, ("b", "#495057"))
+            legend_main.append(Patch(facecolor=color, label=f"{kind}点"))
+    ax.legend(handles=legend_main, loc="upper left", fontsize=7.5,
+              framealpha=0.85, ncol=2)
+    axm.legend(loc="upper left", fontsize=7, framealpha=0.85)
+
     step = max(1, n // 12)
-    ax.set_xticks(range(0, n, step))
-    ax.set_xticklabels([dates[i] for i in range(0, n, step)], fontsize=7, rotation=30)
-    ax.set_title(f"{cs.name} {cs.code} 缠论结构 · {n}根原始K/"
-                 f"{len(groups)}个合并单位(其中{len(merged_units)}组多根合并)/"
-                 f"{len(c.bi_list)}笔/{len(cs.segments)}段/{len(c.zs_list)}中枢", fontsize=11)
+    axm.set_xticks(range(0, n, step))
+    axm.set_xticklabels([dates[i] for i in range(0, n, step)], fontsize=7, rotation=30)
+    ax.set_title(f"{cs.name} {cs.code} 缠论全要素结构图 · {n}根K/"
+                 f"{len(groups)}合并单位/{len(c.fx_list)}分型/{len(c.bi_list)}笔/"
+                 f"{len(cs.segments)}段/{len(c.zs_list)}中枢/{len(pts)}买卖点", fontsize=11)
     ax.grid(axis="y", linestyle="--", linewidth=0.4, alpha=0.4)
+    axm.grid(axis="y", linestyle="--", linewidth=0.4, alpha=0.3)
     ax.spines[["top", "right"]].set_visible(False)
+    axm.spines[["top", "right"]].set_visible(False)
+    axm.set_ylabel("MACD", fontsize=8)
     fig.tight_layout()
     PLOTS.mkdir(parents=True, exist_ok=True)
     out = out or (PLOTS / f"chan_{cs.code}_{datetime.now():%Y%m%d}.png")
