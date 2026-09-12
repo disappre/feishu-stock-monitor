@@ -1,0 +1,72 @@
+{
+ "generated_at": "2026-09-13T01:32:44",
+ "n_pool": 836,
+ "n_signals": 3027,
+ "split_date": "2026-02-04",
+ "full": {
+  "chan_盘整上": {
+   "n": 266,
+   "win_rate": 0.861,
+   "mean_pct": -4.319
+  },
+  "chan_盘整下": {
+   "n": 194,
+   "win_rate": 0.876,
+   "mean_pct": 3.849
+  },
+  "chan_趋势上": {
+   "n": 1304,
+   "win_rate": 0.886,
+   "mean_pct": -4.755
+  },
+  "chan_趋势下": {
+   "n": 1263,
+   "win_rate": 0.897,
+   "mean_pct": 4.509
+  }
+ },
+ "train": {
+  "chan_盘整上": {
+   "n": 253,
+   "win_rate": 0.866,
+   "mean_pct": -4.431
+  },
+  "chan_盘整下": {
+   "n": 182,
+   "win_rate": 0.879,
+   "mean_pct": 3.913
+  },
+  "chan_趋势上": {
+   "n": 919,
+   "win_rate": 0.894,
+   "mean_pct": -4.419
+  },
+  "chan_趋势下": {
+   "n": 704,
+   "win_rate": 0.889,
+   "mean_pct": 3.755
+  }
+ },
+ "test": {
+  "chan_盘整上": {
+   "n": 13,
+   "win_rate": 0.769,
+   "mean_pct": -2.129
+  },
+  "chan_盘整下": {
+   "n": 12,
+   "win_rate": 0.833,
+   "mean_pct": 2.877
+  },
+  "chan_趋势上": {
+   "n": 385,
+   "win_rate": 0.865,
+   "mean_pct": -5.556
+  },
+  "chan_趋势下": {
+   "n": 559,
+   "win_rate": 0.907,
+   "mean_pct": 5.459
+  }
+ }
+}
