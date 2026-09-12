@@ -40,6 +40,7 @@ WEIGHTS = {
     "rsi": 0.5,
     "surge": 0.5,
     "chan_3rd": 2.5,     # 缠论三买/三卖：回测双期胜率88-93%，全系统最强结构信号
+    "mainwave": 1.8,      # 五步抓主升：量能破五触发(教学规则,未回测)
 }
 
 
@@ -48,6 +49,8 @@ def _weight(s: Signal) -> float:
         return WEIGHTS["pattern"] * s.confidence
     if s.source == "chan":
         return WEIGHTS["chan_3rd"] * s.confidence
+    if s.source == "mainwave":
+        return WEIGHTS["mainwave"] * s.confidence
     if s.signal_type.startswith("fractal_break"):
         return WEIGHTS["fractal_break"]
     if s.signal_type.endswith(("rsi_div",)):  # bull_reversal_rsi_div 等

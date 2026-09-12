@@ -51,6 +51,7 @@ class RuleEngine:
         from .rules_cluster import PatternClusterRule
         from .rules_fractal import FractalBreakRule
         from .rules_ma import MACrossRule
+        from .rules_mainwave import MainwaveRule
         from .rules_pair import PairSpreadRule
         from .rules_price import PriceSurgeRule, RSIRule, VolumeSurgeRule
         from .rules_wolf import WolfGuardRule
@@ -66,6 +67,7 @@ class RuleEngine:
             "pair_spread": PairSpreadRule,
             "chan_3rd": ChanThirdPointRule,
             "wolf_guard": WolfGuardRule,
+            "mainwave": MainwaveRule,
         }
         rules: list[Rule] = []
         for key, params in rule_cfg.items():
