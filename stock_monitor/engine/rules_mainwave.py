@@ -82,20 +82,28 @@ def analyze_mainwave(kline: pd.DataFrame, max_wait: int = 7) -> MainwaveState:
     state.stage = "已触发"
     state.note = f"{state.trigger_date} 量能破五触发(三金叉定势)"
 
-    # ③ 标杆量: 触发日起连续放量(>前5日均量1.5倍)天数N, 标杆量=第N-1根
+    # ③ 标杆量（用户口径2026-09-12）：连续放量段中"量能最大那天的前一天"；
+    # 放量>3天=强势建仓（强度标注）。放量判定: 量>前5日均量1.5倍
     v_avg5 = vol.rolling(5).mean()
-    consecutive = 0
+    surge_idx = []
     for i in range(trigger_i, n):
-        if vol.iloc[i] > v_avg5.iloc[i] * 1.5 if pd.notna(v_avg5.iloc[i]) else True:
-            consecutive += 1
+        if pd.isna(v_avg5.iloc[i]) or vol.iloc[i] > v_avg5.iloc[i] * 1.5:
+            surge_idx.append(i)
         else:
             break
-    if consecutive <= 1:
+    if not surge_idx:
         state.benchmark_vol = float(vol.iloc[trigger_i])
-        state.note += f"；仅1天建仓,标杆量=触发日量"
+        state.note += "；无连续放量,标杆量=触发日量"
     else:
-        state.benchmark_vol = float(vol.iloc[trigger_i + consecutive - 2])
-        state.note += f"；连续建仓{consecutive}天,标杆量=第{consecutive - 1}根"
+        max_i = max(surge_idx, key=lambda k: vol.iloc[k])
+        if max_i == surge_idx[0]:
+            state.benchmark_vol = float(vol.iloc[surge_idx[0]])
+            state.note += f"；最大量即首日,标杆量=当日"
+        else:
+            state.benchmark_vol = float(vol.iloc[max_i - 1])
+            state.note += f"；标杆量=最大量({str(kline['date'].iloc[max_i])[:10]})前一天"
+        if len(surge_idx) > 3:
+            state.note += f"；连续放量{len(surge_idx)}天>3天=强势建仓"
 
     # ④ 四象限: 触发日之后每日量对照标杆量
     over = 0
