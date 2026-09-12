@@ -27,7 +27,7 @@ from stock_monitor.backtest import BacktestRecord, split_by_date  # noqa: E402
 from stock_monitor.data import store  # noqa: E402
 
 from chan_analysis import (  # noqa: E402
-    analyze, detect_1st_2nd_points, detect_3rd_points)
+    analyze, detect_1st_2nd_points, detect_3rd_points, detect_divergence)
 
 OUT = REPO / "data" / "chan_backtest.json"
 BUY_KINDS = {"一买", "二买", "最强二买", "三买"}
@@ -64,6 +64,12 @@ def main() -> int:
         pts = detect_1st_2nd_points(cs.c.zs_list, cs.c.bi_list,
                                     cs.segments, cs.df) \
             + detect_3rd_points(cs.c.zs_list, cs.c.bi_list)
+        # 四类背驰信号（2026-09-13接入）: (bi_idx, kind, px, ratio, n_zs)
+        # 方向: 盘整下/趋势下=买入(bullish), 盘整上/趋势上=卖出(bearish)
+        DIV_BUY = {"盘整下", "趋势下"}
+        for dv in detect_divergence(cs.c.bi_list, cs.df, cs.c.zs_list):
+            bi_idx, kind, px, ratio, n_zs = dv
+            pts.append((bi_idx, kind, px))
         kline = cs.df.reset_index(drop=True)
         dates = kline["date"].astype(str).str.slice(0, 10).tolist()
         close = kline["close"].to_numpy(float)
@@ -88,15 +94,16 @@ def main() -> int:
             if entry <= 0:
                 continue
             ret = (exit_ / entry - 1) * 100
+            # 方向: 买卖点用BUY_KINDS; 背驰用四类口径(盘整下/趋势下=买)
+            is_buy = (kind in BUY_KINDS) or (kind in DIV_BUY)
             rec = BacktestRecord(
                 code=code, date=dates[i],
                 signal_type=f"chan_{kind}",
-                direction="bullish" if kind in BUY_KINDS else "bearish",
+                direction="bullish" if is_buy else "bearish",
                 fwd_ret=ret)
             records.append(rec)
             # 方向门控: 买点顺向上段=aligned; 卖点顺向下段=aligned
             sd = seg_dir_at(i)
-            is_buy = kind in BUY_KINDS
             aligned = (is_buy and sd == 1) or ((not is_buy) and sd == -1)
             records_gated.append((rec, aligned))
         if (n + 1) % 50 == 0:
