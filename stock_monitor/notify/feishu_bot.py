@@ -61,12 +61,20 @@ def upload_image(png_path: str) -> str | None:
 
 
 def send_card(title: str, elements_markdown: list[str], color: str = "blue",
-              image_key: str | None = None) -> dict:
-    """推送一条卡片消息。elements_markdown 为若干段 markdown 文本。"""
+              image_key: str | None = None,
+              images: list[tuple[str, str]] | None = None) -> dict:
+    """推送卡片。elements_markdown 为markdown段；images=[(image_key, alt)]多图模式。
+
+    多图用法（图+文交替）：调用方自行把文本段与图片在 elements 里排序——
+    传 images 时按顺序追加到全部文本之后，若需图文穿插请用 elements 重组。
+    """
     elements = [{"tag": "markdown", "content": text} for text in elements_markdown]
     if image_key:
         elements.append({"tag": "img", "img_key": image_key,
                          "alt": {"tag": "plain_text", "content": title}})
+    for key, alt in (images or []):
+        elements.append({"tag": "img", "img_key": key,
+                         "alt": {"tag": "plain_text", "content": alt}})
     elements.append({
         "tag": "note",
         "elements": [{"tag": "plain_text",
