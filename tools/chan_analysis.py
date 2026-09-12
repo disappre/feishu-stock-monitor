@@ -87,8 +87,11 @@ class ChanStructure:
         recent_n = len(self.c.bi_list) - 5
         divs = [d for d in detect_divergence(self.c.bi_list, self.df, self.c.zs_list) if d[0] >= recent_n]
         if divs:
-            idx, kind, px, ratio = divs[-1]
-            lines.append(f"- ⚠️ {kind}：第{idx}笔动能比{ratio}（MACD柱面积萎缩）")
+            idx, kind, px, ratio, n_zs = divs[-1]
+            meaning = {"盘整上": "短线卖出", "盘整下": "短线买入(轻仓)",
+                       "趋势上": "顶部信号(可重仓)", "趋势下": "最可靠买入(可重仓)"}[kind]
+            lines.append(f"- ⚠️ {kind}背驰：第{idx}笔 动能比{ratio}"
+                         f"（经过{n_zs}个中枢）→ {meaning}")
         pts = [p for p in detect_3rd_points(self.c.zs_list, self.c.bi_list,
                                             last_px=self.c.bars_raw[-1].close,
                                             max_age_bars=5) if p[0] >= recent_n]
@@ -112,39 +115,47 @@ def macd(close: pd.Series, fast=12, slow=26, signal=9):
 
 
 def detect_divergence(bi_list, df: pd.DataFrame, zs_list=None, lookback: int = 8) -> list:
-    """笔级背驰检测（按原文第24/64课口径修正）：
+    """四类背驰检测（2026-09-13升级：按用户教学视频+原文第24/27课口径）。
 
-    原文要求：①比较对象=围绕同一中枢的进入段与离开段（b与c），不是任意相邻两笔；
-             ②结构前提=B段把MACD黄白线回拉0轴附近（两段间经过中枢）；
-             ③判定=离开段柱面积 < 进入段。
-    本实现的近似：取最近lookback笔中的同向笔对，要求两笔之间**存在至少一个中枢**
-    （即"经过中枢"的结构前提），且离开笔创新极值而MACD柱面积萎缩。
+    四类：盘整上/盘整下/趋势上/趋势下——由离开方向×中枢数决定：
+      - 向上离开+1个中枢 = 上涨盘整背驰（短线卖出）
+      - 向下离开+1个中枢 = 下跌盘整背驰（短线买入，轻仓）
+      - 向上离开+≥2中枢  = 上涨趋势背驰（最可靠顶部，可重仓）
+      - 向下离开+≥2中枢  = 下跌趋势背驰（确定性最高买入，可重仓）
+    判定：离开笔创新极值 + 笔对之间经过中枢 + MACD柱面积萎缩。
 
-    返回 [(bi_index, '顶背驰'/'底背驰', price, area_ratio), ...]【待验证】
+    返回 [(bi_index, '盘整上'/'盘整下'/'趋势上'/'趋势下', price, area_ratio, n_zs), ...]
+    【待验证】
     """
     if len(bi_list) < 3 or df is None or len(df) < 40:
         return []
-    dif, _, hist = macd(df["close"].astype(float))
+    _, _, hist = macd(df["close"].astype(float))
     hist.index = df["date"].astype(str).str.slice(0, 10).tolist()
     out = []
     recent = bi_list[-lookback:]
-    for a, b in zip(recent, recent[1:]):
+    # 进入段vs离开段 = 隔一笔的同向笔对 bi[i] vs bi[i+2]（中间隔反向笔+可能的中枢）
+    # 注：相邻笔方向永远相反（笔的定义），比较相邻对是死代码（2026-09-13修复）
+    for i in range(len(recent) - 2):
+        a, b = recent[i], recent[i + 2]
         if a.direction != b.direction:
             continue
         up = a.direction == Direction.Up
-        # 原文前提：两段之间须经过中枢（进入段与离开段围绕同一中枢）
+        # 中枢锚定：笔对之间/所在区间内经过的中枢计数（盘整1个=盘整背驰，≥2=趋势背驰）
+        n_zs = 0
         if zs_list:
-            between_zs = any(
-                str(a.fx_b.dt)[:10] <= str(z.sdt)[:10] <= str(b.fx_a.dt)[:10]
-                or str(a.fx_b.dt)[:10] <= str(z.edt)[:10] <= str(b.fx_a.dt)[:10]
-                or (str(z.sdt)[:10] <= str(a.fx_b.dt)[:10] and str(z.edt)[:10] >= str(b.fx_a.dt)[:10])
-                for z in zs_list)
-            if not between_zs:
-                continue
+            for z in zs_list:
+                zs_s, zs_e = str(z.sdt)[:10], str(z.edt)[:10]
+                a_d, b_d = str(a.fx_b.dt)[:10], str(b.fx_a.dt)[:10]
+                # 中枢与进入段终点~离开段起点区间有交集,或中枢在两笔之间
+                if (a_d <= zs_s <= b_d) or (a_d <= zs_e <= b_d) or \
+                   (zs_s <= a_d and zs_e >= b_d) or (zs_s <= b.fx_b.dt.strftime('%Y-%m-%d') and zs_e >= b.fx_b.dt.strftime('%Y-%m-%d')):
+                    n_zs += 1
+            if n_zs == 0:
+                continue          # 缠论背驰必须锚定中枢（与传统背离的本质区别）
         new_extreme = b.fx_b.fx > a.fx_b.fx if up else b.fx_b.fx < a.fx_b.fx
         if not new_extreme:
             continue
-        # 两笔区间内MACD柱面积（原文: 向上看红柱/向下看绿柱，简化为全柱面积）
+        # 两笔区间内MACD柱面积（离开段 vs 进入段）
         def area(bi):
             d0, d1 = str(bi.fx_a.dt)[:10], str(bi.fx_b.dt)[:10]
             seg = hist.loc[d0:d1]
@@ -154,8 +165,12 @@ def detect_divergence(bi_list, df: pd.DataFrame, zs_list=None, lookback: int = 8
             continue
         if ab < aa * 0.8:                       # 动能萎缩20%以上
             idx = bi_list.index(b)
-            out.append((idx, "顶背驰" if up else "底背驰",
-                        b.fx_b.fx, round(ab / aa, 2)))
+            # 四类命名：方向×中枢数
+            if up:
+                kind = "趋势上" if n_zs >= 2 else "盘整上"
+            else:
+                kind = "趋势下" if n_zs >= 2 else "盘整下"
+            out.append((idx, kind, b.fx_b.fx, round(ab / aa, 2), n_zs))
     return out
 
 
@@ -545,16 +560,36 @@ def plot_structure(cs: ChanStructure, out: Path = None) -> Path:
     axm.plot(range(n), dif, color="#1c7ed6", linewidth=0.9, label="DIF")
     axm.plot(range(n), dea, color="#f76707", linewidth=0.9, label="DEA")
     axm.axhline(0, color="#868e96", linewidth=0.5)
-    # 背驰标注：笔级背驰(副图橙色圆点+连线)与段级背驰(一买/一卖的组成,主图已有标签)
-    for idx, kind, px, ratio in detect_divergence(c.bi_list, df, c.zs_list):
+    # 四类背驰标注：副图MACD上箭头+主图买卖点标记（趋势背驰加粗强调）
+    DIV_STYLE = {  # kind -> (颜色, 副图偏移方向, 主图标记文案)
+        "盘整上": ("#e8590c", -18, "盘整上背驰\n短线卖出"),
+        "盘整下": ("#0b7285", 14, "盘整下背驰\n短线买入·轻仓"),
+        "趋势上": ("#c92a2a", -20, "趋势上背驰\n顶部·可重仓"),
+        "趋势下": ("#2f9e44", 16, "趋势下背驰\n最可靠买入·可重仓"),
+    }
+    for dv in detect_divergence(c.bi_list, df, c.zs_list):
+        idx, kind, px, ratio, n_zs = dv
         if idx >= len(c.bi_list):
             continue
         bi = c.bi_list[idx]
         x = x_of(bi.fx_b.dt)
+        color, dy, main_label = DIV_STYLE.get(kind, ("#e8590c", -18, kind))
+        is_trend = kind.startswith("趋势")
+        # 副图：MACD柱上标注（趋势背驰更大更粗）
         axm.annotate(f"{kind}({ratio})", (x, hist.iloc[x] if x < len(hist) else 0),
-                     xytext=(0, 14 if "顶" in kind else -18), textcoords="offset points",
-                     ha="center", fontsize=6.5, color="#e8590c", fontweight="bold",
-                     arrowprops=dict(arrowstyle="->", color="#e8590c", lw=0.7))
+                     xytext=(0, dy), textcoords="offset points",
+                     ha="center", fontsize=8 if is_trend else 6.5,
+                     color=color, fontweight="bold",
+                     arrowprops=dict(arrowstyle="->", color=color,
+                                     lw=1.2 if is_trend else 0.7))
+        # 主图：趋势背驰在价格端点加醒目标签（盘整背驰只画副图，避免主图过密）
+        if is_trend:
+            above = kind == "趋势上"
+            ax.annotate(main_label, (x, px),
+                        xytext=(0, 20 if above else -30), textcoords="offset points",
+                        ha="center", fontsize=8, fontweight="bold", color="white",
+                        bbox=dict(boxstyle="round,pad=0.3", fc=color,
+                                  ec="none", alpha=0.92), zorder=9)
 
     # ── 主力趋势辨别色带（八阶段量价规则，主图顶部） ──
     from stock_monitor.engine.mainforce import STAGES, classify_stage, stage_series
@@ -672,7 +707,7 @@ def main() -> int:
                 tag = "⚠️" + "/".join(sorted({p[1] for p in pts}))
             divs = detect_divergence(cs.c.bi_list, cs.df, cs.c.zs_list)
             if divs and divs[-1][0] >= recent_n:
-                tag += f"⚠️{divs[-1][1]}"
+                tag += f"⚠️{divs[-1][1]}背驰"
             rows.append((code, name, str(bi.direction), pos,
                          "上段" if seg and seg[4] == 1 else "下段", last_px, tag))
         # 次级别判断：日线中枢内的股票，方向下沉到30分钟结构
