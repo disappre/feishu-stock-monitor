@@ -144,9 +144,91 @@ function render(kl, ch) {
   });
 
   const macdOffset = n - ch.macd.hist.length;
+
+  // ── 逐K线解释: 预构建每根K线涉及的缠论事件 ──
+  const KIND_WHY = {
+    '三买': '次级别走势向上离开中枢后，第一次回试低点未跌破中枢上沿ZG——中枢可能扩张或新生，后续上涨概率大',
+    '三卖': '次级别走势向下离开中枢后，第一次回试高点未升破中枢下沿ZD——中枢下方无承接，下跌延续',
+    '一买': '下跌趋势最后一个中枢跌破后出现底背驰(离开段MACD面积<进入段)——熊市结束最早信号，风险高收益大',
+    '一卖': '上涨趋势最后中枢上方出现顶背驰(离开段MACD面积<进入段)——趋势动能衰竭，顶部信号',
+    '二买': '一买后首次次级别回调不破一买低点——确认下跌结束，位置灵活',
+    '二卖': '一卖后首次次级别反弹不破一卖高点——确认上涨结束',
+    '最强二买': '一买后的上涨直接突破中枢且不回踩——最强二买，V型反转',
+    '最强二卖': '一卖后的下跌直接跌破中枢且不回踩——最强二卖',
+  };
+  const DIV_WHY = {
+    '趋势下': '向下离开段创新低但MACD柱面积明显小于进入段(动能衰竭)且经过≥2个中枢——缠论中确定性最高的买入信号(回测90.7%)',
+    '趋势上': '向上离开段创新高但MACD柱面积明显小于进入段(动能衰竭)且经过≥2个中枢——最可靠的顶部卖出信号',
+    '盘整下': '单中枢后的向下离开段动能衰竭——短线买入信号，建议轻仓快进快出',
+    '盘整上': '单中枢后的向上离开段动能衰竭——短线卖出信号，确定性低于趋势背驰',
+  };
+  // 每根K线索引 → 解释条目数组
+  const kExplain = {};
+  const addEx = (i, tag, text) => {
+    if (i === null || i < 0 || i >= n) return;
+    (kExplain[i] = kExplain[i] || []).push({ tag, text });
+  };
+  ch.points.forEach(p => {
+    const i = idxOf(p.date);
+    addEx(i, p.buy ? '🟢买点' : '🔴卖点',
+      `${p.kind}：${KIND_WHY[p.kind] || ''}`);
+  });
+  ch.divergence.forEach(d => {
+    const bi = ch.bi[d.bi];
+    if (!bi) return;
+    const i = idxOf(bi.b.dt.slice(0, 10));
+    addEx(i, '⚡背驰',
+      `${d.kind}背驰(动能比${d.ratio}，经过${d.n_zs}个中枢)：${DIV_WHY[d.kind] || ''}`);
+  });
+  ch.fx.forEach(f => {
+    const i = idxOf(f.dt.slice(0, 10));
+    if (i !== null && i >= n - 120)  // 只解释近120个分型(旧分型太多)
+      addEx(i, '📍分型',
+        f.kind === 'g' ? '顶分型：中间K线高点为三根最高——预示短期下跌' :
+                         '底分型：中间K线低点为三根最低——预示短期上涨');
+  });
+  (ch.merge_units || []).forEach(m => {
+    if (m.e === m.s + 1)  // 只标注2根的合并(最常见的场景), 多根合并太啰嗦
+      addEx(m.e, '📦包含合并',
+        `与第${m.s + 1}根K线存在包含关系(高低点被包住)，按缠论合并为一个最小单位——灰色框所示`);
+  });
+  ch.zs.forEach(z => {
+    const i0 = idxOf(z.s_dt), i1 = idxOf(z.e_dt);
+    if (i0 === null) return;
+    addEx(i0, '🟣中枢',
+      `中枢形成：连续次级别走势重叠区间 ZG=${z.zg} ZD=${z.zd}(波动GG=${z.gg} DD=${z.dd})——筹码密集震荡区`);
+  });
+
   chart.setOption({
     backgroundColor: '#0d1117',
-    tooltip: { trigger: 'axis', axisPointer: { type: 'cross' } },
+    tooltip: {
+      trigger: 'axis', axisPointer: { type: 'cross' },
+      backgroundColor: '#161b22', borderColor: '#30363d',
+      textStyle: { color: '#e6edf3', fontSize: 12 },
+      formatter: (params) => {
+        const p = params[0];
+        const i = p.dataIndex;
+        const k = K[i] || [];
+        const date = dates[i];
+        const o = k[0], c = k[1], lo = k[2], hi = k[3], vol = k[4];
+        const chg = o > 0 ? ((c / o - 1) * 100).toFixed(2) : '0';
+        let html = `<div style="font-weight:600;margin-bottom:4px">${date}</div>` +
+          `<div>开 ${o}｜收 ${c}｜高 ${hi}｜低 ${lo}</div>` +
+          `<div style="color:${c >= o ? '#e03131' : '#2f9e44'}">涨跌 ${chg}%｜量 ${(vol/10000).toFixed(1)}万手</div>`;
+        const hist = ch.macd.hist[i - macdOffset];
+        if (hist !== undefined)
+          html += `<div>MACD柱 ${hist.toFixed(2)}</div>`;
+        const exs = kExplain[i];
+        if (exs && exs.length) {
+          html += '<div style="border-top:1px solid #30363d;margin-top:6px;padding-top:6px">' +
+            exs.map(e =>
+              `<div style="margin-top:4px"><b style="color:#58a6ff">${e.tag}</b>` +
+              `<div style="color:#c9d1d9;font-size:11px;line-height:1.5">${e.text}</div></div>`).join('') +
+            '</div>';
+        }
+        return html;
+      },
+    },
     legend: { data: ['K线', 'MACD'], textStyle: { color: '#8b949e' }, top: 4 },
     grid: [
       { left: '8%', right: '3%', top: '8%', height: '58%' },
