@@ -1,0 +1,200 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>缠论多维分析 · feishu-stock-monitor</title>
+<script src="https://cdn.jsdelivr.net/npm/echarts@5.4.3/dist/echarts.min.js"></script>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body { font-family: -apple-system, "Microsoft YaHei", sans-serif; background: #0d1117; color: #e6edf3; }
+  .top { display: flex; gap: 10px; padding: 14px 20px; align-items: center; flex-wrap: wrap; }
+  .top input { background: #161b22; border: 1px solid #30363d; color: #e6edf3;
+               padding: 8px 12px; border-radius: 6px; font-size: 14px; width: 140px; }
+  .lv-btn { background: #21262d; border: 1px solid #30363d; color: #8b949e;
+            padding: 7px 16px; border-radius: 6px; cursor: pointer; font-size: 13px; }
+  .lv-btn.active { background: #1f6feb; border-color: #1f6feb; color: #fff; }
+  .title { font-size: 18px; font-weight: 600; }
+  .title small { color: #8b949e; font-weight: normal; font-size: 13px; margin-left: 8px; }
+  #info { display: flex; gap: 8px; flex-wrap: wrap; padding: 0 20px 10px; }
+  .tag { padding: 4px 10px; border-radius: 12px; font-size: 12px; border: 1px solid; }
+  .tag.green { color: #3fb950; border-color: #3fb95033; background: #3fb95022; }
+  .tag.red { color: #f85149; border-color: #f8514933; background: #f8514922; }
+  .tag.blue { color: #58a6ff; border-color: #58a6ff33; background: #58a6ff22; }
+  .tag.yellow { color: #d29922; border-color: #d2992233; background: #d2992233; }
+  #chart { width: 100%; height: 72vh; min-height: 520px; }
+  .hint { padding: 8px 20px 20px; color: #8b949e; font-size: 12px; }
+  .err { color: #f85149; }
+</style>
+</head>
+<body>
+<div class="top">
+  <span class="title">缠论多维分析<small>笔·线段·中枢·背驰·买卖点·主力</small></span>
+  <input id="code" placeholder="代码如 600519" value="600519">
+  <button class="lv-btn active" data-lv="daily">日线</button>
+  <button class="lv-btn" data-lv="m30">30分钟(次级别)</button>
+  <button class="lv-btn" data-lv="m5">5分钟(次次级别)</button>
+  <button class="lv-btn" onclick="load()">分析</button>
+</div>
+<div id="info"></div>
+<div id="chart"></div>
+<div class="hint">数据源：本地日线库(834只) / 腾讯实时分钟线 · 结论仅供学习研究，不构成投资建议</div>
+
+<script>
+const chart = echarts.init(document.getElementById('chart'));
+let level = 'daily';
+
+async function load() {
+  const code = document.getElementById('code').value.trim();
+  if (!/^\d{6}$/.test(code)) { alert('请输入6位代码'); return; }
+  document.getElementById('info').innerHTML = '<span class="tag blue">加载中...</span>';
+  try {
+    const [kl, ch] = await Promise.all([
+      fetch(`/api/kline/${code}?level=${level}`).then(r => r.json()),
+      fetch(`/api/chan/${code}?level=${level}`).then(r => r.json()),
+    ]);
+    render(kl, ch);
+  } catch (e) {
+    document.getElementById('info').innerHTML =
+      `<span class="tag red">加载失败: ${e.message}（分钟级需腾讯接口可达；代码需在本地库或可实时获取）</span>`;
+  }
+}
+
+function render(kl, ch) {
+  // 信息标签
+  const tags = [];
+  tags.push(`<span class="tag blue">${ch.name} ${ch.code}｜${ch.n_bars}K/${ch.n_bi}笔/${ch.n_zs}中枢</span>`);
+  const seg = ch.segments[ch.segments.length - 1];
+  if (seg) tags.push(`<span class="tag ${seg.up ? 'green' : 'red'}">当前段: ${seg.up ? '向上' : '向下'} ${seg.s_px}→${seg.e_px}</span>`);
+  if (ch.mainforce) tags.push(`<span class="tag ${ch.mainforce.stage <= 4 ? 'green' : 'red'}">主力: ${ch.mainforce.action}｜${ch.mainforce.advice}</span>`);
+  if (ch.wolf && ch.wolf.danger) tags.push('<span class="tag red">⚠️ 防狼术危险区(DIF/DEA双0下)</span>');
+  if (ch.mainwave) tags.push(`<span class="tag yellow">五步法: ${ch.mainwave.stage}</span>`);
+  const recentDiv = ch.divergence[ch.divergence.length - 1];
+  if (recentDiv) tags.push(`<span class="tag ${recentDiv.kind.includes('下') ? 'green' : 'red'}">${recentDiv.kind}背驰(动能比${recentDiv.ratio})</span>`);
+  document.getElementById('info').innerHTML = tags.join('');
+
+  const dates = kl.dates, K = kl.klines;
+  const n = dates.length;
+  const idxOf = d => { const i = dates.indexOf(d); return i >= 0 ? i : null; };
+
+  // ---- series ----
+  const candle = { name: 'K线', type: 'candlestick',
+    data: K.map(k => [k[0], k[1], k[2], k[3]]),  // open close low high → echarts: open,close,low,high
+    itemStyle: { color: '#e03131', color0: '#2f9e44',
+                 borderColor: '#e03131', borderColor0: '#2f9e44' } };
+
+  // 笔: 折线(markPoint两端)
+  const biSeries = ch.bi.map(b => [idxOf(b.a.dt.slice(0, 10)), b.a.fx]);
+  biSeries.push([idxOf(ch.bi[ch.bi.length - 1].b.dt.slice(0, 10)), ch.bi[ch.bi.length - 1].b.fx]);
+  const biLine = { name: '笔', type: 'line', data: biSeries, smooth: false,
+    lineStyle: { color: '#1c7ed6', width: 1.2 }, symbol: 'none', z: 5 };
+
+  // 线段
+  const segLine = { name: '线段', type: 'line', symbol: 'none', z: 6,
+    data: [], lineStyle: { color: '#f76707', width: 2.6 } };
+  ch.segments.forEach(s => {
+    const i0 = idxOf(s.s_dt), i1 = idxOf(s.e_dt);
+    if (i0 !== null && i1 !== null) {
+      segLine.data.push({ coord: [i0, s.s_px] });
+      segLine.data.push({ coord: [i1, s.e_px] });
+      segLine.data.push({ coord: [i1, s.e_px], symbol: 'none',
+        lineStyle: { opacity: 0 }, value: null }); // 断开
+    }
+  });
+  // 用多条独立series画线段更稳: markLines
+  const segMarks = [];
+  ch.segments.forEach(s => {
+    const i0 = idxOf(s.s_dt), i1 = idxOf(s.e_dt);
+    if (i0 !== null && i1 !== null) segMarks.push([{ coord: [i0, s.s_px] }, { coord: [i1, s.e_px] }]);
+  });
+
+  // 中枢: markArea
+  const zsAreas = ch.zs.map(z => {
+    const i0 = idxOf(z.s_dt), i1 = idxOf(z.e_dt);
+    return i0 !== null && i1 !== null ?
+      [{ xAxis: i0, yAxis: z.zd }, { xAxis: i1 + 1, yAxis: z.zg }] : null;
+  }).filter(Boolean);
+
+  // 买卖点: scatter
+  const ptData = [];
+  ch.points.forEach(p => {
+    const i = idxOf(p.date);
+    if (i !== null) ptData.push({
+      value: [i, p.price], name: p.label,
+      itemStyle: { color: p.buy ? '#2f9e44' : '#c92a2a' } });
+  });
+
+  // 背驰标注
+  const divMarks = [];
+  ch.divergence.forEach(d => {
+    const bi = ch.bi[d.bi];
+    if (!bi) return;
+    const i = idxOf(bi.b.dt.slice(0, 10));
+    if (i !== null) divMarks.push({
+      xAxis: i, yAxis: bi.b.fx,
+      label: { formatter: `${d.kind}背驰`, color: d.kind.includes('下') ? '#3fb950' : '#f85149',
+               fontSize: 10, position: d.kind.includes('下') ? 'bottom' : 'top' } });
+  });
+
+  const macdOffset = n - ch.macd.hist.length;
+  chart.setOption({
+    backgroundColor: '#0d1117',
+    tooltip: { trigger: 'axis', axisPointer: { type: 'cross' } },
+    legend: { data: ['K线', 'MACD'], textStyle: { color: '#8b949e' }, top: 4 },
+    grid: [
+      { left: '8%', right: '3%', top: '8%', height: '58%' },
+      { left: '8%', right: '3%', top: '74%', height: '18%' },
+    ],
+    xAxis: [
+      { type: 'category', data: dates, gridIndex: 0, axisLabel: { color: '#8b949e', fontSize: 10 } },
+      { type: 'category', data: dates, gridIndex: 1, axisLabel: { show: false } },
+    ],
+    yAxis: [
+      { scale: true, gridIndex: 0, axisLabel: { color: '#8b949e' }, splitLine: { lineStyle: { color: '#21262d' } } },
+      { gridIndex: 1, axisLabel: { color: '#8b949e', fontSize: 10 }, splitLine: { lineStyle: { color: '#21262d' } } },
+    ],
+    dataZoom: [
+      { type: 'inside', xAxisIndex: [0, 1], start: 55, end: 100 },
+      { type: 'slider', xAxisIndex: [0, 1], bottom: 2, height: 16,
+        borderColor: '#30363d', textStyle: { color: '#8b949e' } },
+    ],
+    series: [
+      candle,
+      { ...biLine, markArea: { silent: true, itemStyle: { color: '#748ffc22' },
+          data: zsAreas },
+        markLine: { silent: true, symbol: 'none',
+          lineStyle: { color: '#f76707', width: 2.6 },
+          data: segMarks },
+        markPoint: { data: divMarks, symbol: 'pin', symbolSize: 1,
+          label: { show: true } } },
+      { name: '买卖点', type: 'scatter', data: ptData, z: 9,
+        label: { show: true, formatter: p => p.name, color: '#fff',
+                 fontSize: 10, position: 'top' },
+        symbolSize: 10 },
+      { name: 'MACD', type: 'bar', xAxisIndex: 1, yAxisIndex: 1,
+        data: ch.macd.hist.map((v, i) => [macdOffset + i, v]),
+        itemStyle: { color: p => p.value[1] >= 0 ? '#e03131' : '#2f9e44' } },
+      { name: 'DIF', type: 'line', xAxisIndex: 1, yAxisIndex: 1, symbol: 'none',
+        data: ch.macd.dif.map((v, i) => [macdOffset + i, v]),
+        lineStyle: { color: '#1c7ed6', width: 1 } },
+      { name: 'DEA', type: 'line', xAxisIndex: 1, yAxisIndex: 1, symbol: 'none',
+        data: ch.macd.dea.map((v, i) => [macdOffset + i, v]),
+        lineStyle: { color: '#f76707', width: 1 } },
+    ],
+  }, true);
+}
+
+document.querySelectorAll('.lv-btn[data-lv]').forEach(b => {
+  b.onclick = () => {
+    document.querySelectorAll('.lv-btn[data-lv]').forEach(x => x.classList.remove('active'));
+    b.classList.add('active');
+    level = b.dataset.lv;
+    load();
+  };
+});
+document.getElementById('code').addEventListener('keydown', e => { if (e.key === 'Enter') load(); });
+window.addEventListener('resize', () => chart.resize());
+load();
+</script>
+</body>
+</html>
