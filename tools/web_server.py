@@ -108,18 +108,27 @@ def _structure_payload(code: str, name: str, df: pd.DataFrame) -> dict:
     except Exception:
         pass
 
-    # 买卖点
+    # 买卖点（全量历史供前端展示；三买卖不传last_px=不做失效校验）
     points = []
     try:
         for idx, kind, px in (detect_3rd_points(c.zs_list, c.bi_list)
                               + detect_1st_2nd_points(c.zs_list, c.bi_list,
                                                       segments, df)):
-            if idx < len(c.bi_list):
+            if 0 <= idx < len(c.bi_list):
                 points.append({"bi": idx, "kind": kind, "label": KIND_LABEL.get(kind, kind),
                                "buy": kind in BUY_KINDS, "price": round(px, 2),
                                "date": str(c.bi_list[idx].fx_b.dt)[:10]})
     except Exception:
         pass
+
+    # 包含合并分组（merge_groups：可合并的K线组，前端画框）
+    try:
+        from chan_analysis import merge_groups
+        groups = merge_groups(df)
+        merge_units = [{"s": s, "e": e, "hi": round(hi, 2), "lo": round(lo, 2)}
+                       for (s, e, hi, lo) in groups if e > s]
+    except Exception:
+        merge_units = []
 
     last_px = float(df["close"].iloc[-1])
     zs_list = c.zs_list[-6:]   # 最多6个中枢,避免payload过大
@@ -136,7 +145,8 @@ def _structure_payload(code: str, name: str, df: pd.DataFrame) -> dict:
                 "zg": round(z.zg, 2), "zd": round(z.zd, 2),
                 "gg": round(z.gg, 2), "dd": round(z.dd, 2)} for z in zs_list],
         "divergence": divs[-8:],
-        "points": points[-15:],
+        "points": points[-20:],
+        "merge_units": merge_units,
         "macd": {"dif": [round(v, 3) if pd.notna(v) else 0 for v in dif.tolist()[-500:]],
                  "dea": [round(v, 3) if pd.notna(v) else 0 for v in dea.tolist()[-500:]],
                  "hist": [round(v, 3) if pd.notna(v) else 0 for v in hist.tolist()[-500:]]},

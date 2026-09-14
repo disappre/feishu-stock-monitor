@@ -115,6 +115,13 @@ function render(kl, ch) {
       [{ xAxis: i0, yAxis: z.zd }, { xAxis: i1 + 1, yAxis: z.zg }] : null;
   }).filter(Boolean);
 
+  // 包含合并框: 可合并成最小单位的K线组(markArea, 边框灰)
+  const mergeAreas = (ch.merge_units || []).map(m =>
+    [{ xAxis: m.s - 0.45, yAxis: m.lo,
+       itemStyle: { color: 'transparent', borderColor: '#8b949e', borderWidth: 0.8 },
+       emphasis: { itemStyle: { color: 'transparent' } } },
+     { xAxis: m.e + 0.45, yAxis: m.hi }]);
+
   // 买卖点: scatter
   const ptData = [];
   ch.points.forEach(p => {
@@ -160,8 +167,9 @@ function render(kl, ch) {
     ],
     series: [
       candle,
-      { ...biLine, markArea: { silent: true, itemStyle: { color: '#748ffc22' },
-          data: zsAreas },
+      { ...biLine, markArea: { silent: true,
+          data: [...zsAreas.map(a => a.map(p => ({ ...p, itemStyle: { color: '#748ffc22' } }))),
+                  ...mergeAreas] },
         markLine: { silent: true, symbol: 'none',
           lineStyle: { color: '#f76707', width: 2.6 },
           data: segMarks },
