@@ -145,6 +145,40 @@ function render(kl, ch) {
 
   const macdOffset = n - ch.macd.hist.length;
 
+  // ── 多级别中枢轨道（TDX口径：红轨=下跌中新低驱动, 绿轨=上涨中新高驱动）──
+  const lvRailLines = [];   // 轨道水平线（向右延伸特性）
+  const lvRailAreas = [];   // 本级别中枢带
+  const lvLabels = [];
+  const LV_COLOR = { 2: '#f76707', 3: '#9c36b5', 4: '#0c8599' };
+  (ch.levels || []).forEach(L => {
+    if (L.level < 2) return;                        // L1=笔级已有中枢显示
+    const col = LV_COLOR[L.level] || '#868e96';
+    L.zhongshu.forEach(z => {
+      const i0 = idxOf(z.start), i1 = idxOf(z.end);
+      if (i0 === null) return;
+      const endX = i1 === null ? n - 1 : i1;
+      lvRailLines.push([{ coord: [i0, z.zg] }, { coord: [n - 1, z.zg] }]);
+      lvRailLines.push([{ coord: [i0, z.zd] }, { coord: [n - 1, z.zd] }]);
+      lvRailAreas.push([{ xAxis: i0, yAxis: z.zd }, { xAxis: endX, yAxis: z.zg }]);
+      lvLabels.push({ xAxis: i0, yAxis: z.zg,
+        label: { formatter: `L${L.level}中枢`, color: col, fontSize: 9, position: 'top' } });
+    });
+  });
+
+  // ── 多级别买卖点（L2+级: 本级别中枢+次级别确认）──
+  const mlPts = [];
+  const ML = ch.multilevel_points || { '3buy': [], '3sell': [] };
+  ['3buy', '3sell'].forEach(tag => {
+    (ML[tag] || []).forEach(p => {
+      const i = idxOf(p.date);
+      if (i !== null) mlPts.push({
+        value: [i, p.price],
+        name: `L${p.level}${tag === '3buy' ? '3B' : '3S'}`,
+        itemStyle: { color: tag === '3buy' ? '#0ca678' : '#d6336c' },
+        symbolSize: 14 });
+    });
+  });
+
   // ── 逐K线解释: 预构建每根K线涉及的缠论事件 ──
   const KIND_WHY = {
     '三买': '次级别走势向上离开中枢后，第一次回试低点未跌破中枢上沿ZG——中枢可能扩张或新生，后续上涨概率大',
@@ -261,6 +295,18 @@ function render(kl, ch) {
         label: { show: true, formatter: p => p.name, color: '#fff',
                  fontSize: 10, position: 'top' },
         symbolSize: 10 },
+      { name: '多级别', type: 'scatter', data: mlPts, z: 10,
+        label: { show: true, formatter: p => p.name, color: '#fff',
+                 fontSize: 9, fontWeight: 'bold', position: 'bottom' },
+        markArea: { silent: true,
+          data: lvRailAreas.map((a, k) => a.map(p => ({ ...p,
+            itemStyle: { color: 'transparent', borderColor: Object.values(LV_COLOR)[k % 3],
+                         borderWidth: 1, borderType: 'dashed' } }))) },
+        markLine: { silent: true, symbol: 'none',
+          lineStyle: { type: 'dashed', width: 1, opacity: 0.55, color: '#9c36b5' },
+          data: lvRailLines },
+        markPoint: { data: lvLabels, symbol: 'pin', symbolSize: 1,
+          label: { show: true } } },
       { name: 'MACD', type: 'bar', xAxisIndex: 1, yAxisIndex: 1,
         data: ch.macd.hist.map((v, i) => [macdOffset + i, v]),
         itemStyle: { color: p => p.value[1] >= 0 ? '#e03131' : '#2f9e44' } },
@@ -284,6 +330,18 @@ document.querySelectorAll('.lv-btn[data-lv]').forEach(b => {
 });
 document.getElementById('code').addEventListener('keydown', e => { if (e.key === 'Enter') load(); });
 window.addEventListener('resize', () => chart.resize());
+
+// URL参数支持（可分享链接）: ?code=600519&level=m30
+const _qp = new URLSearchParams(location.search);
+if (_qp.get('code') && /^\d{6}$/.test(_qp.get('code'))) {
+  document.getElementById('code').value = _qp.get('code');
+}
+if (_qp.get('level')) {
+  level = _qp.get('level');
+  document.querySelectorAll('.lv-btn[data-lv]').forEach(b => {
+    b.classList.toggle('active', b.dataset.lv === level);
+  });
+}
 load();
 </script>
 </body>

@@ -132,9 +132,27 @@ def _structure_payload(code: str, name: str, df: pd.DataFrame) -> dict:
 
     last_px = float(df["close"].iloc[-1])
     zs_list = c.zs_list[-6:]   # 最多6个中枢,避免payload过大
+
+    # 多级别递归结构（TDX口径：本级别中枢+次级别确认）
+    try:
+        from stock_monitor.engine.chan_levels import build_levels, multilevel_signals
+        _levels = build_levels(c.bi_list, 4)
+        _ml = multilevel_signals(_levels)
+        levels_out = [{
+            "level": lv,
+            "n_swings": len(info.swings),
+            "swings": [{"dt": s.dt, "price": round(s.price, 3), "kind": s.kind}
+                       for s in info.swings],
+            "zhongshu": info.zhongshu[-4:],
+        } for lv, info in _levels.items()]
+        ml_out = {"3buy": _ml["3buy"][-5:], "3sell": _ml["3sell"][-5:]}
+    except Exception:
+        levels_out, ml_out = [], {"3buy": [], "3sell": []}
+
     return {
         "code": code, "name": name, "last_px": round(last_px, 2),
         "n_bars": len(df), "n_bi": len(c.bi_list), "n_zs": len(c.zs_list),
+        "levels": levels_out, "multilevel_points": ml_out,
         "fx": [fxj(fx) for fx in c.fx_list[-120:]],
         "bi": [{"a": fxj(b.fx_a), "b": fxj(b.fx_b),
                 "up": b.direction == Direction.Up} for b in c.bi_list],

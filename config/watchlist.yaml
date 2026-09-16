@@ -66,6 +66,10 @@ rules:
   mainwave:                  # 五步抓主升（量能四象限+标杆量, 视频教学规则）
     enabled: true
     max_wait: 7              # 定势后等待破五的最大交易日数
+  multilevel:                # 多级别递归缠论（TDX口径: 本级别中枢+次级别确认）
+    enabled: true
+    max_level: 4             # 递归到第4级别
+    min_recency: 3           # 近因窗口
 
 review:
   forward_days: 5            # 复盘回填：信号后N个交易日的涨跌

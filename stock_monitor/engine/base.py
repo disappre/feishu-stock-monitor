@@ -47,6 +47,7 @@ class RuleEngine:
 
     def _build_rules(self, rule_cfg: dict) -> list[Rule]:
         from .rules_candlestick import CandlestickDivergenceRule
+        from .chan_levels import MultiLevelRule
         from .rules_chan import ChanThirdPointRule
         from .rules_cluster import PatternClusterRule
         from .rules_fractal import FractalBreakRule
@@ -68,6 +69,7 @@ class RuleEngine:
             "chan_3rd": ChanThirdPointRule,
             "wolf_guard": WolfGuardRule,
             "mainwave": MainwaveRule,
+            "multilevel": MultiLevelRule,
         }
         rules: list[Rule] = []
         for key, params in rule_cfg.items():
