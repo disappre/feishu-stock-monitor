@@ -114,6 +114,25 @@ def macd(close: pd.Series, fast=12, slow=26, signal=9):
     return dif, dea, (dif - dea) * 2
 
 
+def macd_area(hist: pd.Series, d0: str, d1: str) -> tuple[float, float]:
+    """MACD红/绿面积分离计算（通达信"MACD面积源码"口径，2026-09-14接入）。
+
+    源码口径：
+      红面积 = SUM(MACD, BARSLAST(MACD<0)) * (MACD>0)  ← 当前红柱段累计
+      绿面积 = SUM(MACD, BARSLAST(MACD>0)) * (MACD<0)  ← 当前绿柱段累计
+    等价实现：区间内按符号分离求和（红柱取正和、绿柱取负和的绝对值）。
+    相比原先的 abs().sum()（红绿混算），能剔除逆向柱对动能的干扰——
+    这正是缠师第24课"向上看红柱、向下看绿柱"的原意。
+    返回 (红面积, 绿面积)。
+    """
+    seg = hist.loc[d0:d1]
+    if len(seg) == 0:
+        return 0.0, 0.0
+    red = float(seg[seg > 0].sum())
+    green = float(-seg[seg < 0].sum())
+    return red, green
+
+
 def detect_divergence(bi_list, df: pd.DataFrame, zs_list=None, lookback: int = 8) -> list:
     """四类背驰检测（2026-09-13升级：按用户教学视频+原文第24/27课口径）。
 
@@ -156,11 +175,10 @@ def detect_divergence(bi_list, df: pd.DataFrame, zs_list=None, lookback: int = 8
         if not new_extreme:
             continue
         # 两笔区间内MACD柱面积（离开段 vs 进入段）
-        def area(bi):
-            d0, d1 = str(bi.fx_a.dt)[:10], str(bi.fx_b.dt)[:10]
-            seg = hist.loc[d0:d1]
-            return float(seg.abs().sum()) if len(seg) else 0.0
-        aa, ab = area(a), area(b)
+        # 面积对照（源码口径·红绿分离）：向上段比红面积，向下段比绿面积
+        a_red, a_green = macd_area(hist, str(a.fx_a.dt)[:10], str(a.fx_b.dt)[:10])
+        b_red, b_green = macd_area(hist, str(b.fx_a.dt)[:10], str(b.fx_b.dt)[:10])
+        aa, ab = (a_red, b_red) if up else (a_green, b_green)
         if aa <= 0:
             continue
         if ab < aa * 0.8:                       # 动能萎缩20%以上

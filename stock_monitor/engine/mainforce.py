@@ -41,6 +41,66 @@ STAGES = {
 
 
 @dataclass
+class VolumeProfile:
+    """量能特征（通达信"成交量量能"源码口径，2026-09-14接入）。
+
+    源码定义：
+      倍量: V >= REF(V,1)*1.9 AND (假阴柱条件)      ← 放量1.9倍
+      倍缩: REF(V,1) >= V*1.9                        ← 缩量至1/1.9
+      平量: RANGE(V/REF(V,1), 0.97, 1.03)            ← 量能持平
+      百低: V = LLV(V,125) AND BARSCOUNT>=125        ← 125日最低量
+      天量: V = HHV(V,0)                             ← 历史最高量
+      量王: 天量 AND 倍量 AND 量比>3 AND BARSCOUNT>120's
+      长阴短柱: C/REF(C,1)<=0.96 AND V < HHV(V,30)/1.9  ← 大跌却缩量(惜售)
+    """
+    ratio: float = 0.0          # 量比 = V/REF(V,1)
+    vol_ratio_ma: float = 0.0   # 量/前5日均量(原口径保留)
+    倍量: bool = False
+    倍缩: bool = False
+    平量: bool = False
+    百低: bool = False
+    天量: bool = False
+    量王: bool = False
+    长阴短柱: bool = False
+    note: str = ""
+
+
+def volume_profile(kline: pd.DataFrame) -> VolumeProfile:
+    """按源码口径识别量能形态。"""
+    vp = VolumeProfile()
+    vol = kline["volume"].astype(float)
+    close = kline["close"].astype(float)
+    open_ = kline["open"].astype(float)
+    n = len(kline)
+    if n < 2:
+        return vp
+    v, v_prev = float(vol.iloc[-1]), float(vol.iloc[-2])
+    if v_prev > 0:
+        vp.ratio = round(v / v_prev, 2)
+    if n >= 6:
+        vp.vol_ratio_ma = round(v / (vol.iloc[-6:-1].mean() + 1e-9), 2)
+    # 倍量（源码含假阴柱条件：C<O 但 C>REF(C,1) 也算放量）
+    fake_yin = (float(close.iloc[-1]) < float(open_.iloc[-1])
+                and n >= 2 and float(close.iloc[-1]) > float(close.iloc[-2]))
+    vp.倍量 = v >= v_prev * 1.9 and (fake_yin or float(close.iloc[-1]) >= float(open_.iloc[-1])
+                                   or float(close.iloc[-1]) > float(close.iloc[-2]))
+    vp.倍缩 = v_prev >= v * 1.9
+    vp.平量 = 0.97 <= vp.ratio <= 1.03 and n >= 2
+    if n >= 125:
+        vp.百低 = v <= float(vol.iloc[-125:].min()) + 1e-9
+        vp.天量 = v >= float(vol.max()) - 1e-9
+        # 量王: 天量+倍量+量比>3+上市超120日
+        vp.量王 = vp.天量 and vp.倍量 and vp.vol_ratio_ma > 3 and n > 120
+    if n >= 31:
+        vp.长阴短柱 = (float(close.iloc[-1]) / float(close.iloc[-2]) <= 0.96
+                       and v < float(vol.iloc[-31:-1].max()) / 1.9)
+    tags = [t for t in ("倍量", "倍缩", "平量", "百低", "天量", "量王", "长阴短柱")
+            if getattr(vp, t)]
+    vp.note = "｜".join(tags) if tags else f"常规量(量比{vp.ratio})"
+    return vp
+
+
+@dataclass
 class StageResult:
     stage: int
     name: str

@@ -69,10 +69,12 @@ def replay_divergences(code: str, name: str, lookback: int = 8,
     _, _, hist = macd(df["close"].astype(float))
     hist.index = df["date"].astype(str).str.slice(0, 10).tolist()
 
-    def area(bi):
-        d0, d1 = str(bi.fx_a.dt)[:10], str(bi.fx_b.dt)[:10]
-        seg = hist.loc[d0:d1]
-        return float(seg.abs().sum()) if len(seg) else 0.0
+    from chan_analysis import macd_area
+
+    def area(bi, up: bool):
+        """源码口径红绿分离: 向上段比红面积, 向下段比绿面积"""
+        red, green = macd_area(hist, str(bi.fx_a.dt)[:10], str(bi.fx_b.dt)[:10])
+        return red if up else green
 
     out = []
     # 滑过笔序列: 窗口终点b_idx从lookback-1到末尾，每步判定"当下"背驰
@@ -104,7 +106,7 @@ def replay_divergences(code: str, name: str, lookback: int = 8,
         new_extreme = b.fx_b.fx > a.fx_b.fx if up else b.fx_b.fx < a.fx_b.fx
         if not new_extreme:
             continue
-        aa, ab = area(a), area(b)
+        aa, ab = area(a, up), area(b, up)
         if aa <= 0 or ab >= aa * area_ratio:
             continue
         kind = ("趋势上" if n_zs >= 2 else "盘整上") if up \

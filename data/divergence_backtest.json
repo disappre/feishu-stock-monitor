@@ -1,72 +1,72 @@
 {
- "generated_at": "2026-09-13T01:32:44",
- "n_pool": 836,
- "n_signals": 3027,
+ "generated_at": "2026-09-16T13:46:55",
+ "n_pool": 834,
+ "n_signals": 2429,
  "split_date": "2026-02-04",
  "full": {
   "chan_盘整上": {
-   "n": 266,
-   "win_rate": 0.861,
-   "mean_pct": -4.319
+   "n": 223,
+   "win_rate": 0.87,
+   "mean_pct": -4.67
   },
   "chan_盘整下": {
-   "n": 194,
-   "win_rate": 0.876,
-   "mean_pct": 3.849
+   "n": 140,
+   "win_rate": 0.85,
+   "mean_pct": 3.878
   },
   "chan_趋势上": {
-   "n": 1304,
-   "win_rate": 0.886,
-   "mean_pct": -4.755
+   "n": 1072,
+   "win_rate": 0.881,
+   "mean_pct": -4.99
   },
   "chan_趋势下": {
-   "n": 1263,
-   "win_rate": 0.897,
-   "mean_pct": 4.509
+   "n": 994,
+   "win_rate": 0.898,
+   "mean_pct": 4.72
   }
  },
  "train": {
   "chan_盘整上": {
-   "n": 253,
+   "n": 216,
    "win_rate": 0.866,
-   "mean_pct": -4.431
+   "mean_pct": -4.735
   },
   "chan_盘整下": {
-   "n": 182,
-   "win_rate": 0.879,
-   "mean_pct": 3.913
+   "n": 128,
+   "win_rate": 0.852,
+   "mean_pct": 3.916
   },
   "chan_趋势上": {
-   "n": 919,
-   "win_rate": 0.894,
-   "mean_pct": -4.419
+   "n": 744,
+   "win_rate": 0.892,
+   "mean_pct": -4.706
   },
   "chan_趋势下": {
-   "n": 704,
-   "win_rate": 0.889,
-   "mean_pct": 3.755
+   "n": 519,
+   "win_rate": 0.886,
+   "mean_pct": 3.831
   }
  },
  "test": {
   "chan_盘整上": {
-   "n": 13,
-   "win_rate": 0.769,
-   "mean_pct": -2.129
+   "n": 7,
+   "win_rate": 1.0,
+   "mean_pct": -2.653
   },
   "chan_盘整下": {
    "n": 12,
    "win_rate": 0.833,
-   "mean_pct": 2.877
+   "mean_pct": 3.473
   },
   "chan_趋势上": {
-   "n": 385,
-   "win_rate": 0.865,
-   "mean_pct": -5.556
+   "n": 328,
+   "win_rate": 0.854,
+   "mean_pct": -5.635
   },
   "chan_趋势下": {
-   "n": 559,
-   "win_rate": 0.907,
-   "mean_pct": 5.459
+   "n": 475,
+   "win_rate": 0.912,
+   "mean_pct": 5.691
   }
  }
 }
