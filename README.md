@@ -211,3 +211,23 @@ python -m stock_monitor.bot.server
 ## 免责声明
 
 本项目所有输出（含 LLM 生成内容）仅为技术学习与数据统计演示，不构成任何证券投资建议。作者不对任何人因使用本系统而产生的损失承担责任。股市有风险，投资需谨慎。
+
+### 盘中定时扫描（午盘/尾盘）
+
+每个交易日两次实时扫描自选股并推飞书，重点看盘面温度与持仓状态：
+
+```bash
+python tools/intraday_scan.py --session noon    # 午盘速览（11:35，上午收盘后）
+python tools/intraday_scan.py --session close   # 尾盘速览（14:50，收盘前10分钟）
+```
+
+卡片内容：涨跌家数/均涨幅/防狼术危险区占比 + 异动榜Top5 + 五步法持仓状态 + 主力看涨标的。
+
+**三种定时方式（择一即可）**：
+
+1. **Windows 计划任务（推荐，不依赖任何常驻进程）**：
+   右键管理员运行 `setup_schedule.bat`，注册两个任务（周一至周五 11:35 / 14:50）；
+2. **项目调度器**：`python -m stock_monitor.main` 常驻，内置 11:35/14:50 两个 job
+   （时间可在 `config/watchlist.yaml` 的 `noon_scan_time`/`tail_scan_time` 调整）；
+3. **ZCode 自动化**：在当前会话已创建"每交易日11:35午盘扫描"任务；
+   尾盘任务需**新开一个会话**创建（同一会话只能绑定一个定时任务）。

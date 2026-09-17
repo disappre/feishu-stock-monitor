@@ -30,3 +30,6 @@ data/pairs.json
 .claude/
 .zcode/
 lark-auth-qrcode.png
+
+# 盘中扫描日志
+data/intraday_*.log

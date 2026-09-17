@@ -102,9 +102,30 @@ def main():
     interval = int(CONFIG["schedule"]["intraday_interval_min"])
     close_time = CONFIG["schedule"].get("close_scan_time", "15:30")
     hh, mm = (int(x) for x in close_time.split(":"))
+    noon_time = CONFIG["schedule"].get("noon_scan_time", "11:35")
+    tail_time = CONFIG["schedule"].get("tail_scan_time", "14:50")
+    nh, nm = (int(x) for x in noon_time.split(":"))
+    th, tm = (int(x) for x in tail_time.split(":"))
     sched = BlockingScheduler(timezone="Asia/Shanghai")
     sched.add_job(scan_all, "cron", day_of_week="mon-fri",
                   hour="9-14", minute=f"*/{interval}", timezone="Asia/Shanghai")
+
+    def intraday(session: str):
+        """盘中速览（午盘/尾盘）：实时行情扫描自选股并推飞书。"""
+        import subprocess, sys as _sys
+        try:
+            subprocess.run([_sys.executable,
+                            str(Path(__file__).parents[1] / "tools" / "intraday_scan.py"),
+                            "--session", session], timeout=600)
+        except Exception:
+            logging.getLogger("monitor").exception("盘中扫描失败(%s)", session)
+
+    # 午盘速览（上午收盘后）
+    sched.add_job(lambda: intraday("noon"), "cron", day_of_week="mon-fri",
+                  hour=nh, minute=nm, timezone="Asia/Shanghai")
+    # 尾盘速览（收盘前10分钟，捕捉尾盘异动）
+    sched.add_job(lambda: intraday("close"), "cron", day_of_week="mon-fri",
+                  hour=th, minute=tm, timezone="Asia/Shanghai")
     sched.add_job(scan_all, "cron", day_of_week="mon-fri",
                   hour=hh, minute=mm + 5, timezone="Asia/Shanghai")
 

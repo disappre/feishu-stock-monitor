@@ -3,6 +3,8 @@
 schedule:
   intraday_interval_min: 5   # 盘中轮询间隔（分钟），个人使用建议 >=5，避免频控
   close_scan_time: "15:30"   # 收盘后全量扫描时间
+  noon_scan_time: "11:35"    # 午盘速览（上午收盘后，实时数据推飞书）
+  tail_scan_time: "14:50"    # 尾盘速览（收盘前10分钟，捕捉尾盘异动）
 
 # 选股清单来源：watchlist_files 指向的文本文件每次扫描前重新读取（改完即生效）
 watchlist_files:
