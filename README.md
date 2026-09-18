@@ -231,3 +231,15 @@ python tools/intraday_scan.py --session close   # 尾盘速览（14:50，收盘�
    （时间可在 `config/watchlist.yaml` 的 `noon_scan_time`/`tail_scan_time` 调整）；
 3. **ZCode 自动化**：在当前会话已创建"每交易日11:35午盘扫描"任务；
    尾盘任务需**新开一个会话**创建（同一会话只能绑定一个定时任务）。
+
+### Web前端
+
+```bash
+python tools/web_server.py        # 启动后访问 http://localhost:8787
+```
+
+功能：多级别K线（笔/线段/中枢/背驰/买卖点/主力色带全部同图叠加）、
+级别切换（日线/30分钟/5分钟）、**实时搜索**（代码/名称/拼音首字母，带实时价格）、
+**实时刷新**（盘中30秒自动重取）、K线hover逐根解释、URL参数分享（`?code=600519&level=m30`）。
+
+搜索示例：`600519` / `茅台` / `gzmt`（贵州茅台拼音首字母）/ `payh`（平安银行）。

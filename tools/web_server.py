@@ -12,6 +12,9 @@ from __future__ import annotations
 import sys
 from pathlib import Path
 
+import requests
+import yaml
+
 REPO = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(REPO))
 sys.path.insert(0, str(REPO / "tools"))
@@ -174,6 +177,88 @@ def _structure_payload(code: str, name: str, df: pd.DataFrame) -> dict:
 @app.get("/api/levels/{code}")
 def levels(code: str):
     return {"levels": ["daily", "m30", "m5"]}
+
+
+# ── 股票搜索索引（代码前缀 / 名称子串 / 拼音首字母）──
+_SEARCH_INDEX: list = []
+_PINYIN_CACHE: dict = {}
+
+
+def _build_search_index():
+    """从 full_market.txt 构建搜索索引（含拼音首字母），进程内缓存。"""
+    global _SEARCH_INDEX
+    if _SEARCH_INDEX:
+        return
+    from pypinyin import Style, lazy_pinyin
+    for pf in ("data/full_market.txt", "data/pool_836.txt", "data/screen_pool.txt"):
+        p = REPO / pf
+        if not p.exists():
+            continue
+        for line in p.read_text(encoding="utf-8").splitlines():
+            parts = [x.strip() for x in line.split("#", 1)[0].split(",")]
+            if len(parts) >= 2 and parts[0].isdigit() and len(parts[0]) == 6:
+                code, name = parts[0], parts[1]
+                if code in _PINYIN_CACHE:
+                    continue
+                try:
+                    ini = "".join(lazy_pinyin(name, style=Style.FIRST_LETTER)).lower()
+                except Exception:
+                    ini = ""
+                _PINYIN_CACHE[code] = ini
+                _SEARCH_INDEX.append((code, name, ini))
+    # 自选股优先（放前面）
+    picks = REPO / "data" / "my_picks.txt"
+    if picks.exists():
+        watch = set()
+        for w in yaml.safe_load((REPO / "config" / "watchlist.yaml").read_text(encoding="utf-8")) \
+                .get("watchlist", []):
+            watch.add(str(w["code"]))
+        _SEARCH_INDEX.sort(key=lambda x: (x[0] not in watch, x[0]))
+
+
+@app.get("/api/search")
+def search(q: str = "", limit: int = 12):
+    """实时搜索：代码前缀/名称子串/拼音首字母 → 带实时行情的结果。
+
+    行情用腾讯批量接口一次取回（单请求多代码），避免逐只查询。
+    """
+    q = (q or "").strip().lower()
+    if not q:
+        return {"query": q, "results": []}
+    _build_search_index()
+    hits = []
+    for code, name, ini in _SEARCH_INDEX:
+        if code.startswith(q) or q in name.lower() or (ini and ini.startswith(q)):
+            # 排序权重: 代码前缀 > 拼音首字母 > 名称子串
+            w = 0 if code.startswith(q) else (1 if ini.startswith(q) else 2)
+            hits.append((w, code, name))
+    hits.sort(key=lambda x: (x[0], x[1]))
+    hits = hits[:limit]
+    if not hits:
+        return {"query": q, "results": []}
+
+    # 批量实时行情（一次请求）
+    quotes = {}
+    try:
+        syms = ",".join(("sh" if c.startswith(("6", "5", "9")) else "sz") + c
+                        for _, c, _ in hits)
+        r = requests.get(f"https://qt.gtimg.cn/q={syms}",
+                         headers={"User-Agent": "Mozilla/5.0"}, timeout=5)
+        r.encoding = "gbk"
+        for seg in r.text.strip().split(";"):
+            p = seg.split("~")
+            if len(p) > 32 and p[2]:
+                quotes[p[2]] = {"price": float(p[3]) if p[3] else 0.0,
+                                "pct": float(p[32]) if p[32] else 0.0}
+    except Exception:
+        pass
+
+    results = []
+    for _, code, name in hits:
+        q_ = quotes.get(code, {})
+        results.append({"code": code, "name": name,
+                        "price": q_.get("price"), "pct": q_.get("pct")})
+    return {"query": q, "results": results}
 
 
 @app.get("/api/kline/{code}")

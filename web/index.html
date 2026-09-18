@@ -10,7 +10,20 @@
   body { font-family: -apple-system, "Microsoft YaHei", sans-serif; background: #0d1117; color: #e6edf3; }
   .top { display: flex; gap: 10px; padding: 14px 20px; align-items: center; flex-wrap: wrap; }
   .top input { background: #161b22; border: 1px solid #30363d; color: #e6edf3;
-               padding: 8px 12px; border-radius: 6px; font-size: 14px; width: 140px; }
+               padding: 8px 12px; border-radius: 6px; font-size: 14px; width: 200px; }
+  .search-wrap { position: relative; }
+  #sug { position: absolute; top: 42px; left: 0; width: 340px; max-height: 330px;
+         overflow-y: auto; background: #161b22; border: 1px solid #30363d;
+         border-radius: 6px; z-index: 99; display: none; box-shadow: 0 8px 24px #0008; }
+  #sug .item { padding: 7px 12px; cursor: pointer; display: flex;
+               justify-content: space-between; gap: 10px; font-size: 13px; }
+  #sug .item:hover, #sug .item.sel { background: #1f6feb33; }
+  #sug .item .nm { color: #e6edf3; }
+  #sug .item .cd { color: #8b949e; font-size: 12px; margin-left: 6px; }
+  #sug .item .px { font-variant-numeric: tabular-nums; }
+  #sug .item .up { color: #f85149; }
+  #sug .item .dn { color: #3fb950; }
+  #sug .empty { padding: 10px 12px; color: #8b949e; font-size: 12px; }
   .lv-btn { background: #21262d; border: 1px solid #30363d; color: #8b949e;
             padding: 7px 16px; border-radius: 6px; cursor: pointer; font-size: 13px; }
   .lv-btn.active { background: #1f6feb; border-color: #1f6feb; color: #fff; }
@@ -30,10 +43,15 @@
 <body>
 <div class="top">
   <span class="title">缠论多维分析<small>笔·线段·中枢·背驰·买卖点·主力</small></span>
-  <input id="code" placeholder="代码如 600519" value="600519">
+  <span class="search-wrap">
+    <input id="code" placeholder="代码/名称/拼音 (如 600519、茅台、gzmt)" value="600519"
+           autocomplete="off">
+    <div id="sug"></div>
+  </span>
   <button class="lv-btn active" data-lv="daily">日线</button>
   <button class="lv-btn" data-lv="m30">30分钟(次级别)</button>
   <button class="lv-btn" data-lv="m5">5分钟(次次级别)</button>
+  <button class="lv-btn" id="liveBtn" title="开启后每30秒刷新最新行情">实时刷新:关</button>
   <button class="lv-btn" onclick="load()">分析</button>
 </div>
 <div id="info"></div>
@@ -328,7 +346,98 @@ document.querySelectorAll('.lv-btn[data-lv]').forEach(b => {
     load();
   };
 });
-document.getElementById('code').addEventListener('keydown', e => { if (e.key === 'Enter') load(); });
+document.getElementById('code').addEventListener('keydown', e => {
+  const sug = document.getElementById('sug');
+  const items = [...sug.querySelectorAll('.item')];
+  const open = sug.style.display === 'block' && items.length > 0;
+  if (e.key === 'ArrowDown' && open) {
+    e.preventDefault();
+    const cur = items.findIndex(i => i.classList.contains('sel'));
+    items.forEach(i => i.classList.remove('sel'));
+    items[(cur + 1) % items.length].classList.add('sel');
+    items[(cur + 1) % items.length].scrollIntoView({ block: 'nearest' });
+  } else if (e.key === 'ArrowUp' && open) {
+    e.preventDefault();
+    const cur = items.findIndex(i => i.classList.contains('sel'));
+    items.forEach(i => i.classList.remove('sel'));
+    const nxt = (cur - 1 + items.length) % items.length;
+    items[nxt].classList.add('sel');
+    items[nxt].scrollIntoView({ block: 'nearest' });
+  } else if (e.key === 'Enter') {
+    if (open) {
+      const sel = items.find(i => i.classList.contains('sel')) || items[0];
+      pick(sel.dataset.code);
+    } else {
+      closeSug();
+      load();
+    }
+  } else if (e.key === 'Escape') {
+    closeSug();
+  }
+});
+
+// ── 实时搜索（输入即搜，300ms防抖，带实时行情）──
+let _sugTimer = null, _sugSeq = 0;
+const $code = document.getElementById('code');
+const $sug = document.getElementById('sug');
+
+function closeSug() { $sug.style.display = 'none'; $sug.innerHTML = ''; }
+
+function pick(code) {
+  $code.value = code;
+  closeSug();
+  load();
+}
+
+$code.addEventListener('input', () => {
+  const q = $code.value.trim();
+  clearTimeout(_sugTimer);
+  if (!q) { closeSug(); return; }
+  _sugTimer = setTimeout(() => doSearch(q), 300);
+});
+
+async function doSearch(q) {
+  const seq = ++_sugSeq;
+  try {
+    const r = await fetch(`/api/search?q=${encodeURIComponent(q)}`);
+    const d = await r.json();
+    if (seq !== _sugSeq) return;                    // 丢弃过期响应
+    if (!d.results || !d.results.length) {
+      $sug.innerHTML = '<div class="empty">无匹配（可输入代码、名称或拼音首字母）</div>';
+      $sug.style.display = 'block';
+      return;
+    }
+    $sug.innerHTML = d.results.map((x, i) => {
+      const pct = x.pct === null || x.pct === undefined ? '' :
+        `<span class="${x.pct >= 0 ? 'up' : 'dn'}">${x.pct >= 0 ? '+' : ''}${x.pct.toFixed(2)}%</span>`;
+      const px = x.price ? `<span class="px">${x.price.toFixed(2)}</span>` : '';
+      return `<div class="item${i === 0 ? ' sel' : ''}" data-code="${x.code}">
+        <span><span class="nm">${x.name}</span><span class="cd">${x.code}</span></span>
+        <span>${px} ${pct}</span></div>`;
+    }).join('');
+    $sug.style.display = 'block';
+    $sug.querySelectorAll('.item').forEach(el => {
+      el.onclick = () => pick(el.dataset.code);
+    });
+  } catch (e) { closeSug(); }
+}
+
+document.addEventListener('click', e => {
+  if (!e.target.closest('.search-wrap')) closeSug();
+});
+
+// ── 实时刷新（每30秒重取行情，盘中用）──
+let _liveTimer = null;
+document.getElementById('liveBtn').onclick = function () {
+  if (_liveTimer) {
+    clearInterval(_liveTimer); _liveTimer = null;
+    this.textContent = '实时刷新:关'; this.classList.remove('active');
+  } else {
+    _liveTimer = setInterval(load, 30000);
+    this.textContent = '实时刷新:开(30s)'; this.classList.add('active');
+    load();
+  }
+};
 window.addEventListener('resize', () => chart.resize());
 
 // URL参数支持（可分享链接）: ?code=600519&level=m30

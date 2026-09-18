@@ -12,3 +12,4 @@ lark-oapi>=1.4
 openai>=1.40
 statsmodels>=0.14   # 协整检验(EG/ADF, tools/find_pairs.py)
 czsc>=1.0           # 缠论结构分析(分型/笔/中枢/包含合并, tools/chan_analysis.py)
+pypinyin>=0.50       # 拼音首字母搜索(前端实时搜索, tools/web_server.py)
